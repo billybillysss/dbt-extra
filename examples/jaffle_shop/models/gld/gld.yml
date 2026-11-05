@@ -1,0 +1,115 @@
+version: 2
+models:
+- name: gld_customers
+  description: Classic Jaffle Shop customer mart; all customers retained, all order
+    statuses counted.
+  constraints:
+  - type: primary_key
+    columns:
+    - customer_id
+  config:
+    meta:
+      owner: analytics
+      domain: sales
+  columns:
+  - name: customer_id
+    data_type: bigint
+    description: Application customer identifier.
+    data_tests:
+    - unique
+    - not_null
+  - name: first_name
+    data_type: varchar
+  - name: last_name
+    data_type: varchar
+  - name: first_order
+    data_type: date
+  - name: most_recent_order
+    data_type: date
+  - name: number_of_orders
+    data_type: bigint
+    data_tests:
+    - nonnegative
+  - name: customer_lifetime_value
+    data_type: decimal(12, 2)
+    description: Sum of all order payments, matching the classic demo; no refund ledger
+      is supplied.
+    data_tests:
+    - nonnegative
+- name: gld_daily_sales
+  description: Daily order and payment totals split by lifecycle status, not net recognized
+    revenue.
+  data_tests:
+  - unique_combination:
+      arguments:
+        columns:
+        - order_date
+        - status
+  config:
+    meta:
+      owner: analytics
+      domain: sales
+  columns:
+  - name: order_date
+    data_type: date
+  - name: status
+    data_type: varchar
+    config:
+      meta:
+        role: dimension
+  - name: order_count
+    data_type: bigint
+  - name: payment_total
+    data_type: decimal(12, 2)
+    data_tests:
+    - nonnegative
+- name: gld_orders
+  description: One row per order, with all payment methods aggregated before the join.
+  constraints:
+  - type: primary_key
+    columns:
+    - order_id
+  config:
+    meta:
+      owner: analytics
+      domain: sales
+  columns:
+  - name: order_id
+    data_type: bigint
+    data_tests:
+    - unique
+    - not_null
+  - name: customer_id
+    data_type: bigint
+  - name: order_date
+    data_type: date
+  - name: status
+    data_type: varchar
+  - name: amount
+    data_type: decimal(12, 2)
+    description: Total payments for the order, including returned or pending orders;
+      not net revenue.
+    data_tests:
+    - nonnegative
+  - name: credit_card_amount
+    data_type: decimal(12, 2)
+  - name: payment_count
+    data_type: bigint
+- name: gld_payment_method_summary
+  description: Payment-method usage, including zero-value payments.
+  config:
+    meta:
+      owner: payments
+      domain: sales
+  columns:
+  - name: payment_method
+    data_type: varchar
+    data_tests:
+    - unique
+    - not_null
+  - name: payment_count
+    data_type: bigint
+  - name: paid_order_count
+    data_type: bigint
+  - name: payment_total
+    data_type: decimal(12, 2)

@@ -1,0 +1,58 @@
+version: 2
+models:
+- name: gld_customer_cohorts
+  description: Disjoint customer cohorts using raw CTEs, INTERSECT, EXCEPT and UNION.
+  config:
+    meta:
+      owner: analytics
+      domain: demo
+  columns:
+  - name: customer_id
+    data_type: bigint
+  - name: cohort
+    data_type: varchar
+- name: gld_join_counts
+  description: Compare structured inner, left, right, full and cross joins between
+    orders and customers.
+  config:
+    meta:
+      owner: analytics
+      domain: demo
+  columns:
+  - name: join_type
+    data_type: varchar
+    data_tests:
+    - unique
+    - not_null
+  - name: row_count
+    data_type: bigint
+    data_tests:
+    - nonnegative
+- name: gld_macro_arguments
+  description: Macro defaults, positional/named arguments, arrays, DuckDB maps and
+    a nested wrapper.
+  config:
+    meta:
+      owner: analytics
+      domain: demo
+  columns:
+  - name: order_id
+  - name: default_rounding
+  - name: positional_rounding
+  - name: named_rounding
+  - name: alternate_named_rounding
+  - name: rounded_with_fee
+    description: Add a fictional one-unit fee to demonstrate array/map macro arguments;
+      not used by the marts.
+- name: gld_customer_attribute_hash
+  description: Adapter introspection deferred to dbt; offline inspect/optimize reject
+    this runtime-only model.
+  config:
+    meta:
+      owner: analytics
+      domain: demo
+  columns:
+  - name: customer_id
+    data_type: bigint
+  - name: attribute_hash
+    data_type: varchar

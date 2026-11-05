@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-labelledby="title description">
+  <title id="title">dbt-extra symbol</title>
+  <desc id="description">Two interlocking modules in teal and sky blue form a square, separated by a transparent stepped seam. The Lagoon palette is preserved on dark backgrounds.</desc>
+  <g id="modular-joint">
+    <path fill="#0D9488" d="M18 18H110V46H74V74H46V110H18Z"/>
+    <path fill="#38BDF8" d="M54 110V82H82V54H110V110Z"/>
+  </g>
+</svg>

@@ -1,0 +1,12 @@
+{{ config(materialized='table', meta={'owner': 'analytics', 'domain': 'demo'}) }}
+
+WITH ranked AS (
+  SELECT o.order_id, o.customer_id, o.amount, o.status AS unused_status,
+    ROW_NUMBER() OVER (PARTITION BY o.customer_id ORDER BY o.amount DESC, o.order_id) AS position
+  FROM {{ ref('gld_orders') }} AS o
+)
+SELECT r.order_id, r.customer_id, r.amount, r.position
+FROM ranked AS r
+WHERE r.position <= 2
+ORDER BY r.customer_id NULLS LAST, r.position
+LIMIT 10

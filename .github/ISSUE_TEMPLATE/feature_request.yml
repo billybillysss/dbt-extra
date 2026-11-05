@@ -1,0 +1,33 @@
+name: Feature request
+description: Describe a dbt review or inspection workflow dbt-extra could improve.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Start with the problem rather than an implementation. dbt-extra is an offline
+        companion; dbt SQL and property YAML remain the source of truth.
+        Use only redacted examples and do not include production data or credentials.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe who needs this and where the current workflow breaks down.
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Example input and desired output
+      description: Include a small redacted SQL/YAML example or proposed CLI interaction, plus dialect and template requirements if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Current workaround and alternatives
+      description: What do you use today? Could an existing command or documentation improvement solve this?
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Safety and compatibility considerations
+      description: If relevant, describe source-file changes, missing schema evidence, runtime macros, or compatibility needs.

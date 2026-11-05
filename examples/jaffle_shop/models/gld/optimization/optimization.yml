@@ -1,0 +1,208 @@
+version: 2
+models:
+- name: gld_optimizer_constants
+  description: Source rewrite - fold 1 + 2 to 3. The division is not promised to fold.
+  config:
+    meta:
+      owner: analytics
+      domain: demo
+  columns:
+  - name: currency_scale
+    data_type: double
+  - name: sample_value
+    data_type: integer
+- name: gld_customer_leaderboard
+  description: Source removes unused largest_order and returned_order_count aggregates
+    while preserving exact scalar macro calls, DISTINCT, HAVING, ranking and the final
+    deterministic limit. Expanded inspection can additionally simplify wrappers.
+  config:
+    meta:
+      owner: analytics
+      domain: demo
+  columns:
+  - name: customer_id
+    data_type: bigint
+  - name: ranked_revenue
+    data_type: decimal(12, 2)
+    description: Top-two eligible completed-order payment totals, not all-status customer
+      lifetime value.
+  - name: revenue_rank
+    data_type: bigint
+  - name: average_amount
+    data_type: double
+  - name: order_count
+    data_type: bigint
+- name: gld_customer_lifetime_value
+  description: Source removes unused input status while preserving round_money calls
+    and all-status totals. Expanded inspection can additionally remove pass-through steps.
+  config:
+    meta:
+      owner: analytics
+      domain: demo
+  columns:
+  - name: customer_id
+    data_type: bigint
+    data_tests:
+    - unique
+    - not_null
+  - name: lifetime_value
+    data_type: decimal(12, 2)
+    description: Total payments for customers with orders; unlike gld_customers, customers
+      without orders are absent.
+- name: gld_customer_order_ranking
+  description: Source prunes unused input status without crossing the top-two ranking
+    boundary. The window, tie-breaker and final limit must survive.
+  config:
+    meta:
+      owner: analytics
+      domain: demo
+  columns:
+  - name: order_id
+    data_type: bigint
+  - name: customer_id
+    data_type: bigint
+  - name: amount
+    data_type: decimal(12, 2)
+  - name: position
+    data_type: bigint
+- name: gld_distinct_paying_customers
+  description: Source prunes unused status before DISTINCT, but keeps the complete
+    customer/order tuple before projecting customer_id; a customer can appear twice.
+  config:
+    meta:
+      owner: analytics
+      domain: demo
+  columns:
+  - name: customer_id
+    description: One row per distinct paid customer/order pair, NOT one row per customer.
+    data_type: bigint
+- name: gld_high_value_customers
+  description: Source rewrites positive equality-EXISTS to payment-key membership.
+    Orders above the global average retain scalar AVG semantics and cannot multiply
+    when several credit-card payments match.
+  config:
+    meta:
+      owner: analytics
+      domain: demo
+  columns:
+  - name: order_id
+    data_type: bigint
+  - name: customer_id
+    data_type: bigint
+  - name: amount
+    data_type: decimal(12, 2)
+  - name: average_order_amount
+    data_type: double
+- name: gld_payment_union
+  description: Source collapses complementary card/non-card UNION ALL scans to one
+    scan excluding NULL payment methods; repeated order/amount pairs must survive.
+  config:
+    meta:
+      owner: analytics
+      domain: demo
+  columns:
+  - name: order_id
+    data_type: bigint
+  - name: amount
+    data_type: decimal(12, 2)
+- name: gld_optimizer_projections
+  description: Source and inspection rewrites - prune unused outputs, merge wrappers,
+    eliminate a dead CTE and simplify/push down the positive-customer predicate.
+  config:
+    meta:
+      owner: analytics
+      domain: demo
+  columns:
+  - name: order_id
+    data_type: bigint
+  - name: customer_id
+    data_type: bigint
+- name: gld_optimizer_predicates
+  description: Source and inspection push a simplified customer filter inside a
+    DISTINCT derived table without changing the DISTINCT tuple.
+  config:
+    meta:
+      owner: analytics
+      domain: demo
+  columns:
+  - name: order_id
+    data_type: bigint
+  - name: customer_id
+    data_type: bigint
+- name: gld_optimizer_schema_projection
+  description: Source rewrite - expand a star using the complete ordered outputs of
+    local authored slv_orders SQL, qualify columns and generate a short relation alias.
+    The canonical teaching input also removes WHERE TRUE. YAML column documentation
+    alone is not complete schema evidence.
+  config:
+    meta:
+      owner: analytics
+      domain: demo
+  columns:
+  - name: order_id
+    data_type: bigint
+  - name: customer_id
+    data_type: bigint
+  - name: order_date
+    data_type: date
+  - name: status
+    data_type: varchar
+- name: gld_optimizer_boolean_normalization
+  description: Source and inspection normalize a Boolean OR-of-AND predicate to bounded conjunctive
+    normal form while preserving SQL three-valued logic.
+  config:
+    meta:
+      owner: analytics
+      domain: demo
+  columns:
+  - name: order_id
+    data_type: bigint
+  - name: customer_id
+    data_type: bigint
+- name: gld_optimizer_join_simplification
+  description: Source and inspection rearrange inner/cross joins to attach conjunctive equality
+    predicates rather than retaining an avoidable Cartesian join. Multiplicity is preserved.
+  config:
+    meta:
+      owner: analytics
+      domain: demo
+  columns:
+  - name: order_id
+    data_type: bigint
+  - name: peer_order_id
+    data_type: bigint
+  - name: matched_order_id
+    data_type: bigint
+- name: gld_optimizer_shared_subqueries
+  description: Source and inspection factor two identical deterministic grouped derived tables
+    into a shared CTE, retaining both consumers and their join. This is not row deduplication.
+  config:
+    meta:
+      owner: analytics
+      domain: demo
+  columns:
+  - name: customer_id
+    data_type: bigint
+  - name: order_count
+    data_type: bigint
+  - name: repeated_order_count
+    data_type: bigint
+- name: gld_optimizer_customer_profile
+  description: Source removes an unused first_order projection and its wrapper.
+    Expanded selected-output inspection of first_name can additionally remove unused
+    order/payment LEFT JOIN branches after proving grouped join-key uniqueness.
+  config:
+    meta:
+      owner: analytics
+      domain: demo
+  columns:
+  - name: customer_id
+    data_type: bigint
+  - name: first_name
+    data_type: varchar
+  - name: last_name
+    data_type: varchar
+  - name: number_of_orders
+    data_type: bigint
+  - name: customer_lifetime_value
+    data_type: decimal(12, 2)

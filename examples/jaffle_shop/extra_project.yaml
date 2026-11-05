@@ -1,0 +1,16 @@
+version: 2
+analysis:
+  dialect: duckdb
+inspection:
+  expand: true
+  optimize: true
+optimization:
+  format: pretty
+  preserve_macros: true
+export:
+  output_dir: extra_review
+  format: xlsx
+  views:
+    finance:
+      select:
+        - 'path:models/gld/**'

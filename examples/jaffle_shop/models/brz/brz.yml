@@ -1,0 +1,31 @@
+version: 2
+models:
+- name: brz_customers
+  description: Faithful mapping of the application customer source.
+  config:
+    meta:
+      domain: sales
+  columns:
+  - name: id
+  - name: first_name
+  - name: last_name
+- name: brz_orders
+  description: Faithful mapping of application orders without invented order amounts.
+  config:
+    meta:
+      domain: sales
+  columns:
+  - name: id
+  - name: user_id
+  - name: order_date
+  - name: status
+- name: brz_payments
+  description: Preserve original payment amounts in cents.
+  config:
+    meta:
+      domain: sales
+  columns:
+  - name: id
+  - name: order_id
+  - name: payment_method
+  - name: amount

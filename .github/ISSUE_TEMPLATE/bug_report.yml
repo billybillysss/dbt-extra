@@ -1,0 +1,44 @@
+name: Bug report
+description: Report a reproducible CLI, analysis, export, or source-editing problem.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for testing dbt-extra. Share only a minimal, redacted reproduction.
+        Do not attach credentials, private catalogs, production data, or database files.
+        For vulnerabilities, follow the security policy instead of filing a public bug:
+        https://github.com/billybillysss/dbt-extra/blob/HEAD/SECURITY.md
+  - type: textarea
+    id: environment
+    attributes:
+      label: Version and environment
+      description: Include extra --version, Python version, OS, SQL dialect, and installation method. For a source checkout, include the Git commit.
+      placeholder: |
+        extra version:
+        Git commit (if using a checkout):
+        Python / OS:
+        SQL dialect:
+        Installed with:
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include the exact command and the smallest redacted dbt SQL/YAML that reproduces the problem. Include macro definitions or artifact details only if needed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should happen, and which output or files should change?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and diagnostics
+      description: Paste the error, coverage reason, or unexpected diff. Redact sensitive paths and metadata. If a write failed, describe any files left changed.
+    validations:
+      required: true

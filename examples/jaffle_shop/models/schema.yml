@@ -1,0 +1,37 @@
+version: 2
+models:
+  - name: orders
+    description: Completed orders, one row per order.
+    columns:
+      - name: order_id
+        description: Order identifier.
+        data_type: bigint
+        data_tests:
+          - not_null
+          - unique
+      - name: customer_id
+        description: Customer identifier.
+        data_type: bigint
+      - name: amount
+        description: Completed order amount, in the project's currency.
+        data_type: decimal(12,2)
+  - name: customer_revenue
+    description: Completed-order revenue per customer, not a governed metric definition.
+    config:
+      meta:
+        owner: finance
+    columns:
+      - name: customer_id
+      - name: revenue
+      - name: order_count
+seeds:
+  - name: demo_raw_orders
+    columns:
+      - name: order_id
+        data_type: bigint
+      - name: customer_id
+        data_type: bigint
+      - name: amount
+        data_type: decimal(12,2)
+      - name: status
+        data_type: varchar

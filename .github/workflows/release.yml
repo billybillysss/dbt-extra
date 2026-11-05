@@ -1,0 +1,30 @@
+name: Validate release candidate (no publishing)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    uses: ./.github/workflows/ci.yml
+
+  candidate:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - run: uv sync --locked
+      - run: uv build --no-sources
+      - run: uvx twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dbt-extra-release-candidate
+          path: dist/*
+
+# Private verification only: no tag trigger, publishing command or OIDC permission.
+# Public visibility and PyPI publication require separate maintainer approval.
