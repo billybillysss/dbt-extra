@@ -12,9 +12,9 @@ uv run extra --project-dir examples/jaffle_shop validate
 uv run extra --project-dir examples/jaffle_shop export --format json
 ```
 
-Read `examples/jaffle_shop/extra_review/review.json`. Supply only the relevant models,
+Read `examples/jaffle_shop/extra/review/review.json`. Supply only the relevant models,
 sources, macro definitions and business descriptions to your assistant, together
-with the envelope (`format`, `format_version`, `source_of_truth`, `dialect`).
+with the envelope (`format_version`, `source_of_truth`, `dialect`).
 Include upstream context and coverage status/reasons. Dependencies outside selected
 resources are not automatically included; do not invent missing definitions.
 

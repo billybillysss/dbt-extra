@@ -10,7 +10,7 @@ first, then run these commands from the repository root.
 uv run --locked extra --project-dir examples/jaffle_shop export --format xlsx --select customer_revenue
 ```
 
-Open `examples/jaffle_shop/extra_review/review.xlsx` in Excel. Review files can
+Open `examples/jaffle_shop/extra/review/review.xlsx` in Excel. Review files can
 contain sensitive SQL and metadata; this demo uses only bundled fixtures.
 
 ## 2. Edit a supported description
@@ -29,7 +29,7 @@ remove hidden sheets. Save the workbook and **close Excel** to release file lock
 ## 3. Preview the source diff
 
 ```bash
-uv run --locked extra --project-dir examples/jaffle_shop import examples/jaffle_shop/extra_review/review.xlsx --preview
+uv run --locked extra --project-dir examples/jaffle_shop import examples/jaffle_shop/extra/review/review.xlsx --preview
 ```
 
 Expect a description change in `examples/jaffle_shop/models/schema.yml` and no
@@ -43,7 +43,7 @@ The next command **changes the bundled project's YAML**. Use a disposable checko
 or a branch, and run it only after reviewing the preview:
 
 ```bash
-uv run --locked extra --project-dir examples/jaffle_shop import examples/jaffle_shop/extra_review/review.xlsx
+uv run --locked extra --project-dir examples/jaffle_shop import examples/jaffle_shop/extra/review/review.xlsx
 git diff -- examples/jaffle_shop/models/schema.yml
 ```
 
@@ -58,8 +58,8 @@ or provide `--dialect` if it cannot be determined):
 
 ```bash
 extra export --format xlsx
-extra import extra_review/review.xlsx --preview
-extra import extra_review/review.xlsx
+extra import extra/review/review.xlsx --preview
+extra import extra/review/review.xlsx
 ```
 
 ## Editing boundaries
@@ -70,7 +70,10 @@ Choose full SQL or supported expression edits, not both for the same model.
 
 CSV import needs the whole directory, including `_baseline.json`. JSON is
 read-only. No-op import changes nothing; row additions/deletions, renames and
-moves are unsupported. Exported inferred-column rows can gain authored metadata.
+moves are unsupported. Exported inferred-column rows can gain authored metadata
+only inside an existing dbt YAML resource entry. Without one, metadata edits are
+skipped with a reason; supported SQL edits still apply. Add the entry in dbt and
+re-export before reviewing its metadata. Import never creates a properties file.
 
 Changed affected files cause a stale-export conflict. Re-export instead of
 overwriting concurrent work. Preview source diffs and run dbt checks. See the

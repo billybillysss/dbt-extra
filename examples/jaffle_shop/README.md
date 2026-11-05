@@ -25,7 +25,7 @@ extra --project-dir examples/jaffle_shop validate
 extra --project-dir examples/jaffle_shop inspect customer_revenue --columns revenue
 extra --project-dir examples/jaffle_shop inspect customer_revenue --columns revenue --from orders
 extra --project-dir examples/jaffle_shop export --format xlsx
-extra --project-dir examples/jaffle_shop import examples/jaffle_shop/extra_review/review.xlsx --preview
+extra --project-dir examples/jaffle_shop import examples/jaffle_shop/extra/review/review.xlsx --preview
 extra --project-dir examples/jaffle_shop optimize --select customer_revenue --preview
 extra --project-dir examples/jaffle_shop enrich --select customer_revenue --preview
 ```

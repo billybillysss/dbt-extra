@@ -18,7 +18,7 @@ wheels/
 *.duckdb
 *.duckdb.wal
 .pytest_cache/
-**/extra_review/
+**/extra/review/
 
 # Temporary Excel lock files
 ~$*.xlsx

@@ -65,13 +65,13 @@ or verifies warehouse existence. Use a current manifest for the intended target.
 ## Export and import
 
 ```bash
-extra export --format xlsx --output-dir extra_review
+extra export --format xlsx --output-dir extra/review
 extra export --format xlsx --expand
 extra export --format csv --preview
 extra export --format json --select customer_revenue
-extra import extra_review/review.xlsx --preview
-extra import extra_review/review.xlsx
-extra import extra_review --preview
+extra import extra/review/review.xlsx --preview
+extra import extra/review/review.xlsx
+extra import extra/review --preview
 ```
 
 `--output-dir` (`--path` alias), `--format xlsx|csv|json`, and `--view NAME`

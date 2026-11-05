@@ -8,7 +8,7 @@ optimization:
   format: pretty
   preserve_macros: true
 export:
-  output_dir: extra_review
+  output_dir: extra/review
   format: xlsx
   views:
     finance:

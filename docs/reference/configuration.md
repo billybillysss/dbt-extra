@@ -18,7 +18,7 @@ inspection:
   compile: true
   boundaries: []
 export:
-  output_dir: extra_review
+  output_dir: extra/review
   format: xlsx
   expand: false
   select:
@@ -36,7 +36,6 @@ optimization:
   select:
     - 'path:models/gld/**'
 metadata:
-  new_properties_file: models/_extra_properties.yml
   select:
     - 'path:models/gld/**'
 ```
@@ -67,11 +66,13 @@ SQL operations require an explicit choice rather than guessing Spark.
 
 ## Defaults and boundaries
 
-Default export: XLSX under `extra_review`, static macro expansion false. Set
+Default export: XLSX under `extra/review/`, static macro expansion false. Set
 `export.expand: true` (or a named view's `expand: true`) for generated previews.
 Inspection: expand, optimize, and compile true (offline physical relation names),
 no explicit boundaries. Optimization: pretty, preserve macros true, no enrichment.
-Metadata: fill missing values only; create properties beside their original model.
+Metadata: fill missing values only in existing dbt YAML resource entries. Missing
+entries are skipped with a reason; no properties files are created. Analysis and
+inference stay in memory until an explicit export or accepted source edit.
 
 Keep analysis, inspection, export, optimization and metadata tool settings here.
 Resource paths belong in `dbt_project.yml`; business metadata belongs in dbt

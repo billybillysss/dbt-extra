@@ -8,7 +8,6 @@ dbt SQL and properties remain the only public source of truth.
 - [Getting started](getting-started.md): install, inspect a model, export and run the demo.
 - [Concepts and boundaries](concepts.md): source ownership, analysis and execution.
 - [Native Jaffle Shop](../examples/jaffle_shop/README.md): the current end-to-end example.
-- [Migrate from slbt](guides/migrating-from-slbt.md): renamed interfaces and fresh review exports.
 
 ## Workflows
 

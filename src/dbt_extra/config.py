@@ -30,7 +30,7 @@ def validate_settings(settings):
         "inspection": {"expand", "optimize", "compile", "boundaries"},
         "export": {"output_dir", "default_view", "format", "select", "exclude", "views", "expand"},
         "optimization": {"format", "select", "exclude", "preserve_macros", "enrich"},
-        "metadata": {"new_properties_file", "select", "exclude"},
+        "metadata": {"select", "exclude"},
     }
     fields(settings, {"version", *allowed}, set(), "extra_project.yaml")
     if settings.get("version", 2) != 2:
@@ -45,7 +45,7 @@ def validate_settings(settings):
                 strings(value, f"{section}.{key}")
             if key in {"expand", "optimize", "compile", "preserve_macros", "enrich"} and type(value) is not bool:
                 raise SpecError(f"{section}.{key}: expected a boolean")
-            if key in {"output_dir", "default_view", "format", "new_properties_file", "dialect", "project_dir"} and (not isinstance(value, str) or not value):
+            if key in {"output_dir", "default_view", "format", "dialect", "project_dir"} and (not isinstance(value, str) or not value):
                 raise SpecError(f"{section}.{key}: expected nonempty text")
     views = mapping(settings.get("export", {}).get("views", {}), "export.views")
     for name, view in views.items():

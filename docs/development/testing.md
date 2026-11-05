@@ -42,8 +42,8 @@ uv run dbt build --project-dir examples/jaffle_shop --profiles-dir examples/jaff
 uv run dbt docs generate --project-dir examples/jaffle_shop --profiles-dir examples/jaffle_shop
 ```
 
-The handwritten `analytics/` fixture additionally runs `dbt parse`, `dbt seed`,
-`dbt build` and `dbt test` with `--project-dir analytics --profiles-dir analytics`.
+Jaffle Shop is the shared native dbt integration fixture. Its `dbt build` runs
+seeds, models, snapshots and tests together in the in-memory DuckDB target.
 These checks do not replace adapter-specific production acceptance tests.
 
 ## Distribution checks
@@ -72,8 +72,9 @@ then invokes the installed CLI from a temporary directory to initialize, validat
 and export native JSON/XLSX and preview import. Repeat after installing the source archive to test sdist
 installation too. The versioned wheel path above must match the version built.
 The validation workflow uses an isolated environment and does not publish packages.
-The manual [release-candidate workflow](https://github.com/billybillysss/dbt-extra/blob/HEAD/.github/workflows/release.yml)
-also calls validation and builds artifacts, but never publishes; see [releasing](releasing.md).
+The [release workflow](https://github.com/billybillysss/dbt-extra/blob/HEAD/.github/workflows/release.yml)
+calls validation before building and publishing to PyPI on `v*` tags or manual
+dispatch; see [releasing](releasing.md) before triggering it.
 
 The package job also installs pytest and DuckDB into the wheel environment and
 runs the full suite against freshly resolved runtime dependencies. This is

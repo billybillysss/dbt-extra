@@ -27,7 +27,7 @@ ORDERED = {"gld_customer_order_ranking", "gld_customer_leaderboard"}
 @pytest.fixture(scope="module")
 def demo(tmp_path_factory):
     root = tmp_path_factory.mktemp("source_examples") / "jaffle_shop"
-    shutil.copytree(EXAMPLE, root, ignore=shutil.ignore_patterns("target", "logs", "extra_review", "dbt_packages"))
+    shutil.copytree(EXAMPLE, root, ignore=shutil.ignore_patterns("target", "logs", "extra", "dbt_packages"))
     optimizer_inputs(root)
     return Project(root)
 
@@ -300,7 +300,7 @@ def test_leaderboard_ties_and_final_limit_are_exercised(demo, warehouse):
 
 def test_preview_and_inspection_are_read_only_then_apply_is_idempotent(tmp_path):
     root = tmp_path / "jaffle_shop"
-    shutil.copytree(EXAMPLE, root, ignore=shutil.ignore_patterns("target", "logs", "extra_review", "dbt_packages"))
+    shutil.copytree(EXAMPLE, root, ignore=shutil.ignore_patterns("target", "logs", "extra", "dbt_packages"))
     before = snapshot(root)
     preview = invoke(root, "optimize", "--select", SELECT, "--preview")
     assert preview.exit_code == 0, preview.output

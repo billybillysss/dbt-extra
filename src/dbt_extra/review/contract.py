@@ -15,6 +15,7 @@ LEGEND = [
     ["dbt-extra dbt review", "dbt files remain the source of truth; no warehouse or dbt execution."],
     ["Editable fields", "Description, properties, SQL and supported expressions. Identity, model_path, file paths, status, and lineage are read-only."],
     ["properties", 'JSON object for other authored metadata, e.g. {"data_tests": ["not_null"]}. Never resolved/inherited config.'],
+    ["Metadata destination", "Existing dbt YAML resource entries only. Missing entries are reported and skipped; no properties file is created."],
     ["sql / expression", "Edit full authored SQL OR individual output expressions, not both for the same resource."],
     ["Blank values", "Clear a field. Removing rows, renaming/moving resources, and new resource creation are not supported."],
     ["Safety", "Import rejects stale source/property files, unknown identities, formulas, and edits to read-only fields."],

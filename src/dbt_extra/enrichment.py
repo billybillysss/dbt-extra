@@ -58,6 +58,9 @@ def enrich(project, *, select=None, exclude=None, changes=None):
         if not r.path or r.path.suffix != ".sql" or r.properties.get("versions"):
             report.append({"resource_id": r.id, "reason": "Read-only or versioned metadata"})
             continue
+        if not r.property_path:
+            report.append({"resource_id": r.id, "reason": "No existing writable dbt YAML entry; add one in dbt and retry"})
+            continue
         proposed = copy.deepcopy(r.properties)
         columns = proposed.setdefault("columns", [])
         by_name = {c["name"]: c for c in columns}

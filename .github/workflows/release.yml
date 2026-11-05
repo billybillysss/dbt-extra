@@ -1,6 +1,9 @@
-name: Validate release candidate (no publishing)
+name: Publish to PyPI
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -10,21 +13,44 @@ jobs:
   validate:
     uses: ./.github/workflows/ci.yml
 
-  candidate:
+  publish:
     needs: validate
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.11"
-      - run: uv sync --locked
-      - run: uv build --no-sources
-      - run: uvx twine check dist/*
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dbt-extra-release-candidate
-          path: dist/*
 
-# Private verification only: no tag trigger, publishing command or OIDC permission.
-# Public visibility and PyPI publication require separate maintainer approval.
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Verify release tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          uv run python - <<'PY'
+          import os
+          from importlib.metadata import version
+
+          expected = f"v{version('dbt-extra')}"
+          actual = os.environ["RELEASE_TAG"]
+          if actual != expected:
+              raise SystemExit(f"Release tag {actual!r} must match package version {expected!r}")
+          print(f"Verified release tag {actual}")
+          PY
+
+      - name: Build distributions
+        run: uv build --no-sources
+
+      - name: Check package metadata
+        run: uvx twine check dist/*
+
+      - name: Publish to PyPI
+        run: uv publish --trusted-publishing always

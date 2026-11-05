@@ -33,5 +33,5 @@ Preview shows diffs without creating files. Apply stages sibling temporary files
 replaces targets, and attempts rollback after failures. No crash-safe transaction
 or concurrency lock is claimed. Export writes review files only and never prunes.
 
-`examples/jaffle_shop` is the current demo. Never overwrite the independent
-handwritten `analytics/` fixture.
+`examples/jaffle_shop` is the shared demo and native dbt integration fixture.
+Run source-editing workflows against a temporary copy to preserve its teaching examples.

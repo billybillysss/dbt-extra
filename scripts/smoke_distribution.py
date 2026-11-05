@@ -61,7 +61,6 @@ def check_archives():
             "docs/logo.md", "tests/test_branding.py",
             "tests/test_logo.py", "docs/assets/dbt-extra-mark.svg",
             "docs/assets/dbt-extra-mark-dark.svg", "docs/assets/dbt-extra-mark-mono.svg",
-            "docs/guides/migrating-from-slbt.md",
         ):
             assert prefix + path in names, f"sdist missing {path}"
         assert archive.extractfile(prefix + "LICENSE").read() == license_text
@@ -70,7 +69,7 @@ def check_archives():
             for name in names for part in Path(name).parts
         ), "sdist includes local build/runtime artifacts"
         assert not any(name.startswith(prefix + "examples/dbt_shop/") for name in names)
-        for category in ("dbt", "catalog", "demo", "extra_review"):
+        for category in ("dbt", "catalog", "demo", "extra"):
             assert not any(name.startswith(prefix + f"examples/jaffle_shop/{category}/") for name in names)
     return version
 
@@ -104,11 +103,12 @@ def smoke_cli(version):
         run("--project-dir", "project", "inspect", "example", "--columns", "id")
         run("--project-dir", "project", "optimize", "--preview")
         run("--project-dir", "project", "export", "--format", "json")
-        catalog = json.loads((project / "extra_review/review.json").read_text(encoding="utf-8"))
-        assert (catalog["format"], catalog["format_version"], catalog["source_of_truth"]) == ("dbt-extra.dbt-review", 2, "dbt")
+        catalog = json.loads((project / "extra/review/review.json").read_text(encoding="utf-8"))
+        assert (catalog["format_version"], catalog["source_of_truth"]) == (1, "dbt")
+        assert "format" not in catalog
         assert catalog["resources"][0]["name"] == "example"
         run("--project-dir", "project", "export", "--format", "xlsx")
-        run("--project-dir", "project", "import", str(project / "extra_review/review.xlsx"), "--preview")
+        run("--project-dir", "project", "import", str(project / "extra/review/review.xlsx"), "--preview")
 
 
 if __name__ == "__main__":

@@ -117,8 +117,12 @@ rewrite boundaries, fixed-point checks, conflict protection, and validation deta
 unambiguous bare-column passthrough/rename descriptions. Transformed expressions
 do not inherit descriptions as though their business meaning were unchanged.
 Missing schema or Jinja evidence leaves properties unresolved. Authored values
-are not overwritten. New model properties default to `_extra_properties.yml`
-beside the model; configure a valid dbt property location if needed.
+are not overwritten. Proposals stay in memory; use `--preview` to inspect the diff
+before applying with `extra enrich`. Only existing dbt YAML model entries are
+updated. Models without one are skipped with a reason; add an entry in dbt first.
+No properties file is created automatically. Existing semantic-model, entity,
+dimension and metric definitions are preserved, not inferred or converted.
+The dbt Semantic Layer is not required for ordinary SQL inspection or enrichment.
 
 After review, run dbt's own parsing, tests and builds independently. Logical
 equivalence checks, metadata inference, executed data tests and warehouse

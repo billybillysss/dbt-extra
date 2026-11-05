@@ -73,7 +73,6 @@ tree. [Try the walkthrough →](docs/getting-started.md)
 
 > **Private preview · 0.1.0:** install from this checkout with repository access.
 > The executable is `extra`; Python imports use `dbt_extra`.
-> [Migrating from slbt](docs/guides/migrating-from-slbt.md).
 
 ## Pick your workflow
 
@@ -89,8 +88,8 @@ tree. [Try the walkthrough →](docs/getting-started.md)
 
 ```bash
 uv run --locked extra --project-dir examples/jaffle_shop export --format xlsx --select customer_revenue
-# Edit supported cells in examples/jaffle_shop/extra_review/review.xlsx, then close Excel.
-uv run --locked extra --project-dir examples/jaffle_shop import examples/jaffle_shop/extra_review/review.xlsx --preview
+# Edit supported cells in examples/jaffle_shop/extra/review/review.xlsx, then close Excel.
+uv run --locked extra --project-dir examples/jaffle_shop import examples/jaffle_shop/extra/review/review.xlsx --preview
 ```
 
 The workbook groups `TABLE → STEP / OUTPUT → COLUMN` rows. Supported edits patch
@@ -126,7 +125,7 @@ analysis:
   dialect: duckdb
 export:
   format: xlsx
-  output_dir: extra_review
+  output_dir: extra/review
   select:
     - 'path:models/gld/**'
 optimization:

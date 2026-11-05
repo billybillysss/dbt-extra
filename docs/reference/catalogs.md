@@ -129,8 +129,10 @@ Macro definitions expose docs/arguments; macro-file rows expose full source.
 
 - Keep the original baseline. Files changed since export cause a conflict for
   affected edits; re-export rather than overwriting concurrent work.
-- No resource/column row additions or deletions, renames or path moves in v2.
-  Inferred column rows already present at export can gain authored metadata.
+- No resource/column row additions or deletions, renames or path moves.
+  Inferred column rows already present at export can gain authored metadata
+  inside an existing dbt YAML resource entry only. Missing entries are reported
+  and skipped, without creating a properties file; supported SQL edits still apply.
 - Choose full SQL **or** structured scope/projection edits for a model, not both. Expressions
   cannot inject statements, arbitrary templates, renames, or change a complex
   query's interface. Supported static ref/source/scalar-macro calls are reversible.
@@ -153,10 +155,14 @@ Preview reports the same proposed diffs without writing files.
 
 ## Read-only JSON
 
-`review.json` has `format: dbt-extra.dbt-review`, `format_version: 2`,
+`review.json` has `format_version: 1`,
 `source_of_truth: dbt`, dialect/artifact metadata, coverage counts, diagnostics and
 resources. Each resource includes authored SQL/properties, available config,
 dependency resolution, query context and analyzed columns with explicit
 status/reasons/provenance. Unknown schema, opaque Jinja and partial value lineage
 remain explicit. JSON is analysis context, not an editable import format or a
 substitute for join/filter context when explaining business behavior.
+
+JSON catalogs and review baselines have no branded `format` field. Baselines
+retain format version 1, original rows and file hashes for conflict checks.
+Older version-2 reviews must be re-exported; do not edit their baseline to upgrade.

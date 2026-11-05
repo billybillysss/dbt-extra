@@ -18,7 +18,7 @@ from tests.helpers import project, put, snapshot
 
 def export(root, **kwargs):
     export_review(project(root), **kwargs)
-    return root / "extra_review/review.xlsx"
+    return root / "extra/review/review.xlsx"
 
 
 def edit(path, sheet, kind, name, **values):
@@ -48,6 +48,24 @@ def config_edit(path, scope, value):
         raise AssertionError(scope)
     book.save(path)
     book.close()
+
+
+def test_missing_yaml_metadata_is_skipped_but_xlsx_sql_edits_apply(native):
+    sql = put(native, "models/undocumented.sql", "select 1 as id")
+    path = export(native, select=["undocumented"])
+    _, baseline = read_review(path)
+    assert baseline["format_version"] == 1 and "format" not in baseline
+    edit(path, "Models", "TABLE", "undocumented", Description="Not persisted")
+    edit(path, "Models", "COLUMN", "id", Description="Identifier", Expression="2")
+    before = snapshot(native)
+    changes = import_review(project(native), path)
+    assert "No existing writable dbt YAML entry" in changes.metadata_skipped["model.shop.undocumented"]
+    assert changes.apply(preview=True) == [sql]
+    assert snapshot(native) == before
+    changes.apply()
+    assert "2 AS id" in sql.read_text()
+    assert set(snapshot(native)) == set(before)
+    assert not project(native).find("undocumented").properties
 
 
 def test_hierarchy_layout_and_forest_paper_theme(native):
@@ -593,6 +611,7 @@ def test_snapshot_table_fill_follows_configured_snapshot_roots(native, folder):
     with (native / "dbt_project.yml").open("a") as stream:
         stream.write(f"snapshot-paths: [{folder}]\n")
     put(native, f"{folder}/nested/order_history.sql", "select id from {{ ref('orders') }}")
+    put(native, f"{folder}/nested/schema.yml", "version: 2\nsnapshots:\n  - name: order_history\n")
     put(native, "models/snapshots/lookalike.sql", "select 1 as id")
     put(native, "seeds/sample.csv", "id\n1\n")
     path = export(native)
@@ -609,7 +628,7 @@ def test_snapshot_table_fill_follows_configured_snapshot_roots(native, folder):
     assert import_review(project(native), path).apply() == []
     edit(path, "Snapshots · nested", "TABLE", "order_history", Description="Snapshot history")
     import_review(project(native), path).apply()
-    assert load_yaml(native / f"{folder}/nested/_extra_properties.yml")["snapshots"][0]["description"] == "Snapshot history"
+    assert load_yaml(native / f"{folder}/nested/schema.yml")["snapshots"][0]["description"] == "Snapshot history"
 
 
 def test_case_when_scalar_template_column_roundtrip(native):
@@ -633,6 +652,7 @@ def test_case_when_expanded_column_metadata_preserves_authored_sql(native):
     put(native, "macros/money.sql", "{% macro round_money(value) %}round({{ value }}, 2){% endmacro %}")
     original = "-- Keep CASE\nselect case when amount > 0 then {{ round_money('amount') }} else 0 end as total from {{ ref('orders') }}\n"
     sql = put(native, "models/conditional.sql", original)
+    put(native, "models/conditional.yml", "version: 2\nmodels:\n  - name: conditional\n")
     path = export(native, expand=True)
     col = next(r for r in rows(path, "Models") if r["Type"] == "COLUMN")
     assert col["Expression"] == "CASE WHEN amount > 0 THEN ROUND(amount, 2) ELSE 0 END"
@@ -641,7 +661,7 @@ def test_case_when_expanded_column_metadata_preserves_authored_sql(native):
     edit(path, "Models", "COLUMN", "total", Description="Conditional total")
     import_review(project(native), path).apply()
     assert sql.read_text() == original
-    assert load_yaml(native / "models/_extra_properties.yml")["models"][0]["columns"][0]["description"] == "Conditional total"
+    assert load_yaml(native / "models/conditional.yml")["models"][0]["columns"][0]["description"] == "Conditional total"
 
 
 @pytest.mark.parametrize("expanded", [False, True])
@@ -720,7 +740,7 @@ def test_expanded_macro_derives_actual_sql_lineage(native):
     put(native, "macros/fields.sql", "{% macro fields() %}id, amount * 2 as doubled{% endmacro %}")
     put(native, "models/mapped.sql", "select {{ fields() }} from {{ ref('orders') }}")
     export(native, expand=True)
-    tables, _ = read_review(native / "extra_review/review.xlsx")
+    tables, _ = read_review(native / "extra/review/review.xlsx")
     cols = {r["column"]: r for r in tables["columns"] if r["name"] == "mapped"}
     assert set(cols) == {"id", "doubled"}
     assert json.loads(cols["doubled"]["upstream_columns"]) == [{"resource_id": "model.shop.orders", "column": "amount"}]

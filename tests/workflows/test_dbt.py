@@ -96,7 +96,7 @@ def test_noop_review_import_is_byte_preserving(native, format):
     p = project(native)
     export_review(p, format=format)
     before = snapshot(native)
-    path = native / "extra_review" / "review.xlsx" if format == "xlsx" else native / "extra_review"
+    path = native / "extra/review" / "review.xlsx" if format == "xlsx" else native / "extra/review"
     changes = import_review(p, path)
     assert changes.apply() == []
     assert snapshot(native) == before
@@ -106,19 +106,19 @@ def test_noop_review_import_is_byte_preserving(native, format):
 def test_path_representation_matches_across_formats(native, format):
     export_review(project(native), format=format)
     if format == "json":
-        items = json.loads((native / "extra_review/review.json").read_text())["resources"]
+        items = json.loads((native / "extra/review/review.json").read_text())["resources"]
     elif format == "csv":
-        with (native / "extra_review/resources.csv").open(encoding="utf-8-sig") as stream:
+        with (native / "extra/review/resources.csv").open(encoding="utf-8-sig") as stream:
             items = list(csv.DictReader(stream))
     else:
-        items = read_review(native / "extra_review/review.xlsx")[0]["resources"]
+        items = read_review(native / "extra/review/review.xlsx")[0]["resources"]
     assert next(r for r in items if r["name"] == "revenue")["model_path"] == "models/gld"
 
 
 def test_metadata_roundtrip_preserves_yaml_comments_tests_and_source_groups(native):
     p = project(native)
     export_review(p, format="csv")
-    review = native / "extra_review"
+    review = native / "extra/review"
     edit_csv(review, "resources", lambda r: r["resource_id"] == "model.shop.orders", description="Reviewed orders")
     edit_csv(review, "resources", lambda r: r["resource_type"] == "source_group", properties='{"database": "new_landing"}')
     edit_csv(review, "columns", lambda r: r["resource_id"] == "model.shop.revenue" and r["column"] == "id",
@@ -139,7 +139,7 @@ def test_metadata_roundtrip_preserves_yaml_comments_tests_and_source_groups(nati
 
 def test_stale_workbook_rejected_without_writes(native):
     export_review(project(native), format="csv")
-    review = native / "extra_review"
+    review = native / "extra/review"
     edit_csv(review, "resources", lambda r: r["name"] == "orders" and r["resource_type"] == "model", description="Changed")
     with (native / "models/slv/orders.sql").open("a") as stream:
         stream.write("-- Concurrent change\n")
@@ -151,15 +151,15 @@ def test_stale_workbook_rejected_without_writes(native):
 
 def test_readonly_path_edits_rejected(native):
     export_review(project(native), format="csv")
-    edit_csv(native / "extra_review", "resources", lambda r: r["name"] == "revenue", model_path="other")
+    edit_csv(native / "extra/review", "resources", lambda r: r["name"] == "revenue", model_path="other")
     with pytest.raises(SpecError, match="Read-only field"):
-        import_review(project(native), native / "extra_review")
+        import_review(project(native), native / "extra/review")
 
 
 def test_expression_roundtrip_keeps_jinja_and_output_alias(native):
     export_review(project(native), format="csv")
-    edit_csv(native / "extra_review", "columns", lambda r: r["resource_id"] == "model.shop.revenue" and r["column"] == "revenue", expression="amount * 2")
-    changes = import_review(project(native), native / "extra_review")
+    edit_csv(native / "extra/review", "columns", lambda r: r["resource_id"] == "model.shop.revenue" and r["column"] == "revenue", expression="amount * 2")
+    changes = import_review(project(native), native / "extra/review")
     changes.apply()
     code = (native / "models/gld/revenue.sql").read_text()
     assert "{{ config(materialized='table') }}" in code
@@ -170,15 +170,15 @@ def test_expression_roundtrip_keeps_jinja_and_output_alias(native):
 def test_full_source_roundtrip_opaque_macro(native):
     put(native, "models/dynamic.sql", "select {{ opaque_macro('amount') }} as amount")
     export_review(project(native), format="csv")
-    edit_csv(native / "extra_review", "resources", lambda r: r["name"] == "dynamic", sql="select {{ opaque_macro('price') }} as amount\n")
-    import_review(project(native), native / "extra_review").apply()
+    edit_csv(native / "extra/review", "resources", lambda r: r["name"] == "dynamic", sql="select {{ opaque_macro('price') }} as amount\n")
+    import_review(project(native), native / "extra/review").apply()
     assert "opaque_macro('price')" in (native / "models/dynamic.sql").read_text()
 
 
 def test_xlsx_formula_rejected_and_text_literals_safe(native):
     put(native, "models/formula.sql", "select 1 as id")
     export_review(project(native), format="xlsx")
-    path = native / "extra_review/review.xlsx"
+    path = native / "extra/review/review.xlsx"
     book = load_workbook(path)
     sheet = book["Models"]
     sheet["L2"] = "=1+1"
@@ -345,8 +345,8 @@ def test_macro_snapshot_and_source_metadata_roundtrip(native):
     p = project(native)
     assert any(r.kind == "snapshot" and r.name == "history" for r in p.resources.values())
     export_review(p, format="csv")
-    edit_csv(native / "extra_review", "resources", lambda r: r["resource_type"] == "macro_definition", description="Double the input")
-    import_review(project(native), native / "extra_review").apply()
+    edit_csv(native / "extra/review", "resources", lambda r: r["resource_type"] == "macro_definition", description="Double the input")
+    import_review(project(native), native / "extra/review").apply()
     assert load_yaml(native / "macros/schema.yml")["macros"][0]["description"] == "Double the input"
     validate_template((native / "snapshots/old.sql").read_text())
 
@@ -420,19 +420,19 @@ def test_clearing_last_metadata_field_is_applied(native):
     put(native, "models/bare.sql", "select 1 as id")
     put(native, "models/bare.yml", "version: 2\nmodels:\n  - name: bare\n    description: Remove this\n")
     export_review(project(native), format="csv")
-    edit_csv(native / "extra_review", "resources", lambda r: r["name"] == "bare", description="")
-    import_review(project(native), native / "extra_review").apply()
+    edit_csv(native / "extra/review", "resources", lambda r: r["name"] == "bare", description="")
+    import_review(project(native), native / "extra/review").apply()
     assert "description" not in load_yaml(native / "models/bare.yml")["models"][0]
 
 
 def test_project_config_changes_invalidate_edits(native):
     export_review(project(native), format="csv")
-    edit_csv(native / "extra_review", "resources", lambda r: r["name"] == "revenue", description="Reviewed")
+    edit_csv(native / "extra/review", "resources", lambda r: r["name"] == "revenue", description="Reviewed")
     with (native / "dbt_project.yml").open("a") as stream:
         stream.write("# Concurrent configuration change\n")
     before = snapshot(native)
     with pytest.raises(SpecError, match="changed since export"):
-        import_review(project(native), native / "extra_review")
+        import_review(project(native), native / "extra/review")
     assert snapshot(native) == before
 
 
@@ -451,13 +451,13 @@ def test_external_tool_settings_are_checked_for_conflicts(tmp_path):
     put(tmp_path, "project/models/one.sql", "select 1 as id")
     p = Project(tmp_path)
     export_review(p, format="csv")
-    edit_csv(p.root / "extra_review", "columns", lambda r: r["column"] == "id", description="Identifier")
+    edit_csv(p.root / "extra/review", "columns", lambda r: r["column"] == "id", description="Identifier")
     changes, _ = optimize(p)
     config.write_text(config.read_text() + "# Concurrent change\n")
     with pytest.raises(SpecError, match="changed while preparing"):
         changes.apply()
     with pytest.raises(SpecError, match="changed since export"):
-        import_review(Project(tmp_path), p.root / "extra_review")
+        import_review(Project(tmp_path), p.root / "extra/review")
 
 
 def test_export_rejects_changes_after_project_load(native):
@@ -473,10 +473,10 @@ def test_yaml_anchors_refuse_writeback(native):
     put(native, "models/anchored.yml", "version: 2\nmodels:\n  - &shared\n    name: anchored\n    description: Shared\n")
     put(native, "models/anchored.sql", "select 1 as id")
     export_review(project(native), format="csv")
-    edit_csv(native / "extra_review", "resources", lambda r: r["name"] == "anchored", description="Changed")
+    edit_csv(native / "extra/review", "resources", lambda r: r["name"] == "anchored", description="Changed")
     before = snapshot(native)
     with pytest.raises(SpecError, match="anchors"):
-        import_review(project(native), native / "extra_review")
+        import_review(project(native), native / "extra/review")
     assert snapshot(native) == before
 
 
@@ -503,7 +503,7 @@ def test_xlsx_rejects_large_cells_before_openpyxl_can_truncate(native):
         export_review(project(native), format="xlsx")
     assert snapshot(native) == before
     export_review(project(native), format="csv")
-    assert import_review(project(native), native / "extra_review").changed() == {}
+    assert import_review(project(native), native / "extra/review").changed() == {}
 
 
 def test_render_markers_cannot_replace_authored_string_literals(native):
@@ -531,10 +531,10 @@ def test_deleting_anchored_scalar_requires_manual_metadata_edit(native):
     put(native, "models/anchored.sql", "select 1 as id")
     put(native, "models/anchored.yml", "version: 2\nmodels:\n  - name: anchored\n    description: &shared Shared\n")
     export_review(project(native), format="csv")
-    edit_csv(native / "extra_review", "resources", lambda row: row["name"] == "anchored", description="")
+    edit_csv(native / "extra/review", "resources", lambda row: row["name"] == "anchored", description="")
     before = snapshot(native)
     with pytest.raises(SpecError, match="anchors"):
-        import_review(project(native), native / "extra_review")
+        import_review(project(native), native / "extra/review")
     assert snapshot(native) == before
 
 
@@ -549,21 +549,22 @@ def test_export_cli_expand_and_named_view(native):
     put(native, "models/multi.sql", "select {{ fields() }} from {{ ref('orders') }}")
     result = invoke(native, "export", "--expand", "-s", "multi")
     assert result.exit_code == 0, result.output
-    tables, baseline = read_review(native / "extra_review/review.xlsx")
+    tables, baseline = read_review(native / "extra/review/review.xlsx")
     assert baseline["expanded_macros"]
     assert {c["column"] for c in tables["columns"]} == {"id", "total"}
     put(native, "extra_project.yaml", "version: 2\nexport:\n  views:\n    expanded:\n      select: [multi]\n      expand: true\n")
     assert invoke(native, "export", "--view", "expanded").exit_code == 0
-    assert read_review(native / "extra_review/review.xlsx")[1]["expanded_macros"]
+    assert read_review(native / "extra/review/review.xlsx")[1]["expanded_macros"]
     assert invoke(native, "export", "--view", "expanded", "--no-expand").exit_code == 0
-    assert not read_review(native / "extra_review/review.xlsx")[1]["expanded_macros"]
+    assert not read_review(native / "extra/review/review.xlsx")[1]["expanded_macros"]
 
 
 def test_expanded_csv_expressions_are_readonly_but_metadata_is_editable(native):
     put(native, "macros/fields.sql", "{% macro fields() %}id, amount as total{% endmacro %}")
     put(native, "models/multi.sql", "select {{ fields() }} from {{ ref('orders') }}")
+    put(native, "models/multi.yml", "version: 2\nmodels:\n  - name: multi\n")
     export_review(project(native), format="csv", select=["multi"], expand=True)
-    review = native / "extra_review"
+    review = native / "extra/review"
     edit_csv(review, "columns", lambda r: r["column"] == "total", description="Generated total")
     import_review(project(native), review).apply()
     export_review(project(native), format="csv", select=["multi"], expand=True)

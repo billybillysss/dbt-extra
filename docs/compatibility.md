@@ -8,7 +8,7 @@
 | Python | Metadata requires 3.11+. CI targets 3.11 and 3.13 on Linux, plus 3.13 on Windows. Other Python/platform combinations are not thereby certified. |
 | SQLGlot | Runtime dependency is constrained to `>=30.8,<30.25`, tested at 30.8.0 and 30.24.0. Dialect availability does not establish warehouse execution support. |
 | Tool settings | Optional `extra_project.yaml`, `version: 2`; no transformation authoring schema. |
-| Review JSON | `format: dbt-extra.dbt-review`, `format_version: 2`, `source_of_truth: dbt`. Read-only analysis; check coverage and the envelope. |
+| Review JSON | `format_version: 1`, `source_of_truth: dbt`. Read-only analysis; check coverage and the envelope. |
 | dbt | Native authored SQL/properties/macros/snapshots. No compile/runtime emulation. Execution compatibility depends on your dbt and adapter versions. The native demo uses DuckDB. |
 | Python internals | Not a separately guaranteed stable public API. Prefer the CLI or explicitly version-tested integrations. |
 
@@ -24,14 +24,11 @@ every other SQLGlot version; CI also tests a freshly resolved installed wheel.
 
 ## Initial version
 
-`dbt-extra` starts at `0.1.0` in a new private repository with fresh Git history.
+`dbt-extra` starts at `0.1.0` as a private preview.
 Install from an authorized source checkout and record its Git commit when
 reporting results. The repository stays private until
 verification and separate maintainer approval to make it public.
 
-The [migration guide](guides/migrating-from-slbt.md) lists all renamed interfaces.
-There are no old-name command, import, environment-variable or review-format aliases.
-Re-export reviews with this version rather than relabeling old baselines.
 Public visibility, package publication and branding are separate release gates;
 see the [release checklist](development/releasing.md).
 

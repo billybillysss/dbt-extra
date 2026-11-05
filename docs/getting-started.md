@@ -16,7 +16,7 @@ uv run --locked extra --version
 
 This is the private `0.1.0` preview; cloning requires repository access.
 The executable is `extra`; Python imports use `dbt_extra`.
-See [compatibility](compatibility.md) and the [migration guide](guides/migrating-from-slbt.md).
+See [compatibility](compatibility.md) for supported versions and limitations.
 
 Prefer pip? From the cloned repository, create and activate a virtual environment
 with Python 3.11+, then run `python -m pip install .`. Replace `uv run --locked extra`
@@ -60,7 +60,7 @@ available physical relation names offline, not through `dbt compile`.
 uv run --locked extra --project-dir examples/jaffle_shop export --format xlsx --select customer_revenue
 ```
 
-Open `examples/jaffle_shop/extra_review/review.xlsx`. Follow the
+Open `examples/jaffle_shop/extra/review/review.xlsx`. Follow the
 [round-trip walkthrough](guides/catalog-round-trip.md) to edit a description and
 preview the YAML diff. Export creates review files, not new dbt models.
 
@@ -72,7 +72,7 @@ No generated-model directory or new model language is needed:
 uv run --locked extra --project-dir path/to/project --dialect duckdb validate
 uv run --locked extra --project-dir path/to/project --dialect duckdb inspect your_model --columns your_column
 uv run --locked extra --project-dir path/to/project --dialect duckdb export --format xlsx --select your_model
-uv run --locked extra --project-dir path/to/project --dialect duckdb import path/to/project/extra_review/review.xlsx --preview
+uv run --locked extra --project-dir path/to/project --dialect duckdb import path/to/project/extra/review/review.xlsx --preview
 ```
 
 Use your actual dialect, not necessarily DuckDB. Optional manifest/catalog

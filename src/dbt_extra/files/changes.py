@@ -93,39 +93,22 @@ class ChangeSet:
             raise SpecError(f"Versioned properties are read-only: {resource.id}")
         path = resource.property_path
         if path is None:
-            if resource.kind not in {"model", "seed", "snapshot"}:
-                raise SpecError(f"No writable property location for {resource.id}")
-            configured = project.settings.get("metadata", {}).get("new_properties_file")
-            path = within(project.root, configured) if configured else resource.path.parent / "_extra_properties.yml"
-            if not any(path.is_relative_to(root) for root in (*project.model_roots, *project.seed_roots, *project.snapshot_roots)):
-                raise SpecError("metadata.new_properties_file must be inside a configured dbt model/seed/snapshot path")
-        if path in project.contents:
-            self.watch(path, digest(project.contents[path]), check=True)
+            raise SpecError(f"No existing writable dbt YAML entry for {resource.id}; add one in dbt and retry")
+        self.watch(path, digest(project.contents[path]), check=True)
         path = self.watch(path)
-        if path.suffix not in {".yml", ".yaml"}:
-            raise SpecError("metadata.new_properties_file must be a YAML file")
         if path not in self.documents:
             parser = YAML(typ="rt")
             parser.preserve_quotes = True
             parser.width = 4096
             parser.indent(mapping=2, sequence=4, offset=2)
             raw = self.before[path]
-            if raw is not None:
-                load_yaml(path)  # strict duplicate-key and portable-literal checks
-            document = parser.load(raw.decode("utf-8")) if raw else {"version": 2}
+            load_yaml(path)  # strict duplicate-key and portable-literal checks
+            document = parser.load(raw.decode("utf-8"))
             self.documents[path] = parser, document
         parser, document = self.documents[path]
-        if resource.property_path:
-            target = document
-            for key in resource.property_locator:
-                target = target[key]
-        else:
-            key = {"model": "models", "seed": "seeds", "snapshot": "snapshots"}[resource.kind]
-            entries = document.setdefault(key, [])
-            if any(e.get("name") == resource.name for e in entries):
-                raise SpecError(f"Properties already exist for {resource.name} in {path}")
-            target = {"name": resource.name}
-            entries.append(target)
+        target = document
+        for key in resource.property_locator:
+            target = target[key]
         if resource.kind == "source_group":
             properties = {**properties, "tables": target.get("tables", [])}
         update_mapping(target, properties)

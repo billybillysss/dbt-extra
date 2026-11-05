@@ -41,13 +41,6 @@ jobs:
           uv run dbt docs generate --project-dir examples/jaffle_shop --profiles-dir examples/jaffle_shop
           uv run extra --project-dir examples/jaffle_shop validate
           uv run extra --project-dir examples/jaffle_shop export --format json --preview
-      - if: matrix.integration
-        name: Check handwritten dbt integration
-        run: |
-          uv run dbt parse --project-dir analytics --profiles-dir analytics
-          uv run dbt seed --project-dir analytics --profiles-dir analytics
-          uv run dbt build --project-dir analytics --profiles-dir analytics
-          uv run dbt test --project-dir analytics --profiles-dir analytics
 
   package:
     runs-on: ubuntu-latest

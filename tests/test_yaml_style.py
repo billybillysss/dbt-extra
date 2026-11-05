@@ -24,7 +24,7 @@ def assert_block_style(node):
 
 def test_project_yaml_uses_block_style():
     paths = []
-    for directory in ("examples", ".github", "analytics"):
+    for directory in ("examples", ".github"):
         for path in (ROOT / directory).rglob("*"):
             if path.suffix in {".yml", ".yaml"} and not any(
                 part in {"target", "logs", "dbt_packages", "catalog"} for part in path.relative_to(ROOT).parts

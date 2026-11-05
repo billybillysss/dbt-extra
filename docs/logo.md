@@ -18,11 +18,10 @@ All assets have transparent backgrounds and a `128 × 128` viewBox. Preserve the
 aspect ratio when resizing. They contain accessible titles/descriptions and
 vector paths without scripts, images, external fonts or external resources.
 
-The README combines the approved icon with a text **dbt-extra** title. The old
-slbt horizontal wordmark is deliberately not reused or relabeled.
+The README combines the approved icon with a text **dbt-extra** title.
 
 Use alt text such as `dbt-extra — Modular joint icon` when embedding the mark.
 Update `tests/test_logo.py` when adding approved variants; preserve geometry and
-the Lagoon palette rather than redrawing the icon during a code migration.
+the Lagoon palette when updating assets.
 
 These files are included under the project's [MIT license](../LICENSE).

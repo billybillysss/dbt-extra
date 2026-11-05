@@ -31,7 +31,7 @@ DOCUMENTS = sorted({
 @pytest.fixture
 def dbt_example(tmp_path):
     destination = tmp_path / "examples/jaffle_shop"
-    shutil.copytree(EXAMPLE, destination, ignore=shutil.ignore_patterns("target", "logs", "extra_review", "dbt_packages"))
+    shutil.copytree(EXAMPLE, destination, ignore=shutil.ignore_patterns("target", "logs", "extra", "dbt_packages"))
     return destination
 
 
@@ -117,7 +117,7 @@ def test_documented_description_review_round_trip(dbt_example):
     original = snapshot(dbt_example)
     result = runner.invoke(cli, [*arguments, "export", "--format", "xlsx", "--select", "customer_revenue"])
     assert result.exit_code == 0, result.output
-    workbook = dbt_example / "extra_review/review.xlsx"
+    workbook = dbt_example / "extra/review/review.xlsx"
     guide = (ROOT / "docs/guides/catalog-round-trip.md").read_text(encoding="utf-8")
     description = blocks(guide, "text")[0].strip()
     book = load_workbook(workbook)

@@ -28,9 +28,10 @@ def read_review(path, *, workbook_edits=None):
 def import_review(project, path):
     workbook_edits = []
     tables, baseline = read_review(path, workbook_edits=workbook_edits)
-    if baseline.get("format") != "dbt-extra.dbt-review-baseline" or baseline.get("format_version") != 2 or baseline.get("project") != project.name:
-        raise SpecError("Review baseline is incompatible with this dbt project")
+    if "format" in baseline or baseline.get("format_version") != 1 or baseline.get("project") != project.name:
+        raise SpecError("Review baseline is incompatible with this dbt project; re-export before editing")
     changes = ChangeSet(project.root)
+    changes.metadata_skipped = {}
     edited = {name: {} for name in HEADERS}
     for name, rows in tables.items():
         original = {key_for(name, r): r for r in baseline["tables"][name]}
@@ -82,13 +83,6 @@ def import_review(project, path):
             if relative not in baseline["files"]:
                 raise SpecError(f"Property location changed since export: {uid}")
             changes.watch(p, baseline["files"][relative], check=True)
-        configured = project.settings.get("metadata", {}).get("new_properties_file")
-        if not resource.property_path and resource.kind in {"model", "seed", "snapshot"}:
-            p = within(project.root, configured) if configured else resource.path.parent / "_extra_properties.yml"
-            relative = p.relative_to(project.root).as_posix()
-            if relative not in baseline["files"]:
-                raise SpecError("New property destination differs from export; re-export")
-            changes.watch(p, baseline["files"][relative], check=True)
         proposed = copy.deepcopy(resource.properties)
         row = edited["resources"].get(uid, old)
         if resource.kind == "model" and resource.path.suffix == ".sql":
@@ -132,7 +126,10 @@ def import_review(project, path):
                     target.update(extras)
         proposed.setdefault("name", resource.name)
         if proposed != resource.properties and (resource.properties or proposed != {"name": resource.name}):
-            changes.properties(project, resource, proposed)
+            if resource.property_path:
+                changes.properties(project, resource, proposed)
+            else:
+                changes.metadata_skipped[uid] = "No existing writable dbt YAML entry; add one in dbt and re-export"
         full_sql_changed = row["sql"] != old["sql"]
         if full_sql_changed and (expression_edits or uid in scope_edits) and uid not in template_sql_edits:
             raise SpecError(f"Edit SQL or expressions, not both: {uid}")

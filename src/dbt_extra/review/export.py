@@ -3,7 +3,7 @@
 from dbt_extra.analysis import catalog
 from dbt_extra.errors import SpecError
 from dbt_extra.files.changes import ChangeSet, content, digest
-from dbt_extra.files.paths import safe_path, within
+from dbt_extra.files.paths import safe_path
 from dbt_extra.review import csv, json
 from dbt_extra.review.contract import HEADERS, json_text
 from dbt_extra.review.workbook import workbook_for
@@ -32,15 +32,12 @@ def baseline_for(project, tables):
     for row in tables["resources"]:
         resource = project.resources[row["resource_id"]]
         paths.update(p for p in (resource.path, resource.property_path) if p)
-        if not resource.property_path and resource.path and resource.kind in {"model", "seed", "snapshot"}:
-            configured = project.settings.get("metadata", {}).get("new_properties_file")
-            paths.add(within(project.root, configured) if configured else resource.path.parent / "_extra_properties.yml")
     # Selected model-only reviews may depend on unselected macro files.
     paths.update(r.path for r in project.resources.values() if r.kind == "macro" and r.path)
     for path in paths | {project.config_path}:
         if content(path) != project.contents.get(path):
             raise SpecError(f"Conflict: {path} changed while preparing export")
-    return {"format": "dbt-extra.dbt-review-baseline", "format_version": 2, "project": project.name,
+    return {"format_version": 1, "project": project.name,
              "tool_config": digest(project.config_content), "tables": tables,
              "macro_files": sorted(r.source_file for r in project.resources.values() if r.kind == "macro" and r.path),
              "files": {p.relative_to(project.root).as_posix(): digest(content(p)) for p in sorted(paths)}}
@@ -49,7 +46,7 @@ def baseline_for(project, tables):
 def export_review(project, *, format="xlsx", output_dir=None, select=None, exclude=None, preview=False, expand=False):
     if format not in {"xlsx", "csv", "json"}:
         raise SpecError(f"Unknown export format: {format}")
-    destination = (project.root / (output_dir or "extra_review")).absolute()
+    destination = (project.root / (output_dir or "extra/review")).absolute()
     safe_path(destination)
     destination = destination.resolve()
     for protected in [*project.model_roots, *project.macro_roots, *project.snapshot_roots, *project.seed_roots]:

@@ -105,7 +105,7 @@ def init_command(ctx, directory, preview):
         raise SpecError(f"Refusing to overwrite {path}")
     changes = ChangeSet(root)
     changes.set(path, dump_yaml({"version": 2, "analysis": {"dialect": ctx.obj["dialect"] or "auto"},
-        "export": {"output_dir": "extra_review", "format": "xlsx"}, "optimization": {"format": "pretty", "preserve_macros": True}}))
+        "export": {"output_dir": "extra/review", "format": "xlsx"}, "optimization": {"format": "pretty", "preserve_macros": True}}))
     finish(changes, preview)
 
 
@@ -177,6 +177,8 @@ def import_command(ctx, path, preview, dialect):
     """Apply supported XLSX/CSV edits to their original native dbt files."""
     project = loaded(ctx, dialect)
     changes = import_review(project, path)
+    for uid, reason in changes.metadata_skipped.items():
+        click.echo(f"Skipped metadata {uid}: {reason}", err=True)
     finish(changes, preview)
 
 
@@ -217,6 +219,9 @@ def optimize_command(ctx, select, exclude, format, preserve_macros, enrich_enabl
 
 def enrichment_summary(report):
     click.echo(f"Metadata: {sum('value' in r for r in report)} missing properties inferred; {sum('reason' in r for r in report)} unresolved")
+    for item in report:
+        if "reason" in item and "column" not in item:
+            click.echo(f"Skipped metadata {item['resource_id']}: {item['reason']}", err=True)
 
 
 @cli.command("enrich")

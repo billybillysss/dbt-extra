@@ -103,7 +103,7 @@ def analyze(project, resource, *, expand=False) -> ResourceAnalysis:
 
 def catalog(project, resources, *, expand=False):
     models = [analyze(project, resource, expand=expand) for resource in resources]
-    return {"format": "dbt-extra.dbt-review", "format_version": 2, "project": project.name, "dialect": project.dialect,
+    return {"format_version": 1, "project": project.name, "dialect": project.dialect,
             "source_of_truth": "dbt", "resources": models, "diagnostics": project.diagnostics,
             "artifact_evidence": {"manifest": str(project.manifest_path) if project.manifest else None,
                                   "generated_at": project.manifest.get("metadata", {}).get("generated_at"),

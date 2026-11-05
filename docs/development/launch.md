@@ -27,8 +27,8 @@ remains private during verification; do not change visibility without approval.
 | --- | --- | --- |
 | P0 | Public access | Open the repository, raw README assets, Actions badge and issue forms while signed out. An authenticated local checkout does not establish public visibility. |
 | P0 | Matching distribution | Verify the private `0.1.0` candidate; publish a new unused version only after separate approval. Follow the [release checklist](releasing.md). |
-| P0 | Migration | Verify [all renamed interfaces](../guides/migrating-from-slbt.md), native dbt inputs and version-2 settings. Test install instructions against actual artifacts. |
-| P0 | Approved artwork | Verify the supplied Modular joint SVG paths, light/dark palette and README rendering; never relabel the old wordmark as the new logo. |
+| P0 | Interfaces | Verify documented commands, native dbt inputs and version-2 settings. Test install instructions against actual artifacts. |
+| P0 | Approved artwork | Verify the supplied Modular joint SVG paths, light/dark palette and README rendering. |
 | P0 | Reproducible first result | Run the README from a fresh checkout and the published install in a clean environment. Confirm SQL output and preview-only behavior without warehouse credentials. |
 | P1 | Trust signals | Confirm linked CI runs passed, package metadata matches the release, and compatibility limitations remain visible. Do not invent benchmarks, adoption figures or supported adapters. |
 | P1 | A visible demonstration | Capture the real inspection command and one workbook description edit followed by its YAML diff. Use bundled data, readable terminal text, captions and a text alternative. |
@@ -45,7 +45,7 @@ and external adoption require separate verification or maintainer action.
    metadata-only preview. Collect dialect, coverage reason, time to first useful
    result, and confusing instructions; request redacted reproductions only.
 2. Fix onboarding blockers, publish the approved release, and link its known
-   limitations and migration notes. Update installation instructions against
+   limitations and release notes. Update installation instructions against
    the matching package.
 3. Share one factual walkthrough in relevant dbt/data-engineering communities,
    respecting each community's promotion rules. Explain the problem and output,

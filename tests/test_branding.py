@@ -1,4 +1,4 @@
-"""Guard the new identity and private-preview release boundaries."""
+"""Guard the new identity and release workflow boundaries."""
 
 from html.parser import HTMLParser
 from importlib.metadata import distribution
@@ -12,6 +12,7 @@ import pytest
 from dbt_extra import Project, SpecError, __version__
 from dbt_extra.analysis import catalog
 from dbt_extra.cli import cli
+from dbt_extra.files.yaml import load_yaml
 from dbt_extra.review import export_review, import_review
 from tests.helpers import put, snapshot
 
@@ -68,26 +69,36 @@ def test_init_previews_new_config_only_and_refuses_overwrite(native):
     result = CliRunner().invoke(cli, arguments)
     assert result.exit_code == 0, result.output
     contents = (native / "extra_project.yaml").read_bytes()
-    assert b"extra_review" in contents
+    assert b"extra/review" in contents
     result = CliRunner().invoke(cli, arguments)
     assert result.exit_code != 0 and "Refusing to overwrite" in result.output
     assert (native / "extra_project.yaml").read_bytes() == contents
 
 
-def test_new_review_envelope_and_legacy_baseline_rejection(native):
+@pytest.mark.parametrize("incompatible", [
+    {"format_version": 2},
+    {"format_version": 0},
+    {"project": "another_project"},
+    {"format": "slbt.dbt-review-baseline"},
+    {"format": "dbt-extra.dbt-review-baseline", "format_version": 2},
+])
+def test_review_version_and_incompatible_baseline_rejection(native, incompatible):
     project = Project(native, dialect="duckdb")
     document = catalog(project, project.select(["revenue"]))
-    assert (document["format"], document["format_version"]) == ("dbt-extra.dbt-review", 2)
+    assert document["format_version"] == 1
+    assert "format" not in document
     export_review(project, format="csv", select=["revenue"])
-    review = native / "extra_review"
+    review = native / "extra/review"
     baseline_path = review / "_baseline.json"
     baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
-    assert baseline["format"] == "dbt-extra.dbt-review-baseline"
+    assert baseline["format_version"] == 1
+    assert "format" not in baseline
+    assert baseline["files"] and baseline["tables"]
     assert import_review(Project(native, dialect="duckdb"), review).changed() == {}
-    baseline["format"] = "slbt.dbt-review-baseline"
+    baseline.update(incompatible)
     baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
     before = snapshot(native)
-    with pytest.raises(SpecError):
+    with pytest.raises(SpecError, match="re-export"):
         import_review(Project(native, dialect="duckdb"), review)
     assert snapshot(native) == before
 
@@ -100,18 +111,54 @@ def test_runtime_contains_no_old_namespace_or_command():
         assert "slbt" not in path.read_text(encoding="utf-8").lower(), path
 
 
-def test_workflows_cannot_publish_packages():
+def test_only_release_workflow_can_publish_packages():
     workflows = ROOT / ".github/workflows"
     if not workflows.is_dir():
         pytest.skip("GitHub configuration is intentionally excluded from the source archive")
     for path in workflows.glob("*.yml"):
+        if path.name == "release.yml":
+            continue
         content = path.read_text(encoding="utf-8")
         assert "uv publish" not in content
         assert "twine upload" not in content
         assert "pypa/gh-action-pypi-publish" not in content
         assert "id-token: write" not in content
-    candidate = (workflows / "release.yml").read_text(encoding="utf-8")
-    assert "workflow_dispatch:" in candidate and "tags:" not in candidate
+    release = load_yaml(workflows / "release.yml")
+    assert release["on"]["push"] == {"tags": ["v*"]}
+    assert "workflow_dispatch" in release["on"]
+    assert release["permissions"] == {"contents": "read"}
+    assert release["jobs"]["validate"] == {"uses": "./.github/workflows/ci.yml"}
+    publish = release["jobs"]["publish"]
+    assert publish["needs"] == "validate"
+    assert publish["permissions"] == {"contents": "read", "id-token": "write"}
+    commands = [step["run"] for step in publish["steps"] if "run" in step]
+    assert commands[0] == "uv sync --locked"
+    assert commands[-3:] == [
+        "uv build --no-sources", "uvx twine check dist/*", "uv publish --trusted-publishing always",
+    ]
+    check = next(step for step in publish["steps"] if step.get("name") == "Verify release tag matches package version")
+    assert check["if"] == "startsWith(github.ref, 'refs/tags/')"
+    assert check["env"] == {"RELEASE_TAG": "${{ github.ref_name }}"}
+
+
+@pytest.mark.parametrize("tag", [f"v{__version__}", "v999.0.0"])
+def test_release_tag_matches_package_version(tag, monkeypatch):
+    path = ROOT / ".github/workflows/release.yml"
+    if not path.is_file():
+        pytest.skip("GitHub configuration is intentionally excluded from the source archive")
+    release = load_yaml(path)
+    check = next(step for step in release["jobs"]["publish"]["steps"]
+                 if step.get("name") == "Verify release tag matches package version")
+    command, script = check["run"].split("\n", 1)
+    assert command == "uv run python - <<'PY'"
+    script, terminator = script.rsplit("\n", 2)[:2]
+    assert terminator == "PY"
+    monkeypatch.setenv("RELEASE_TAG", tag)
+    if tag == f"v{__version__}":
+        exec(compile(script, str(path), "exec"), {})
+    else:
+        with pytest.raises(SystemExit, match="must match package version"):
+            exec(compile(script, str(path), "exec"), {})
 
 
 class References(HTMLParser):
