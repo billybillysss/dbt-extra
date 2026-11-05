@@ -8,6 +8,7 @@ from sqlglot.optimizer.pushdown_predicates import pushdown_predicates
 from sqlglot.optimizer.scope import traverse_scope
 
 from dbt_extra.sql.scopes import volatile
+from dbt_extra.sql.functions import function_spec, has_generators
 
 
 def normalize_predicates(tree):
@@ -17,12 +18,20 @@ def normalize_predicates(tree):
 
 def plain_queries(tree, *, aggregates=False):
     """Reject semantic barriers rather than moving expressions across them."""
+    if has_generators(tree):
+        return False
     allowed = {"expressions", "from_", "joins", "where", "distinct", "order", "with_"}
     if aggregates:
         allowed |= {"group", "having"}
     for node in tree.walk():
+        spec = function_spec(node)
+        if spec and spec.kind in {"aggregate", "window"}:
+            # Local aggregates are deliberately not handed to SQLGlot rules
+            # expecting a native AggFunc, even when aggregates=True.
+            return False
         if isinstance(node, exp.Select):
-            if any(v is not None and k not in allowed for k, v in node.args.items()):
+            if any(v is not None and k not in allowed and not (k == "exclude" and v == [])
+                   for k, v in node.args.items()):
                 return False
             distinct = node.args.get("distinct")
             if distinct and distinct.args.get("on"):

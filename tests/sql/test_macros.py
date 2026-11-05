@@ -6,13 +6,13 @@ from dbt_extra.errors import SpecError
 from dbt_extra.inspection import inspect
 from dbt_extra.sql.macros import parse_model, classify_calls, contains_opaque
 from dbt_extra.sql.renderer import render
-from tests.helpers import project, put
+from tests.helpers import SQL_DIALECTS, project, put
 
 
 SCALAR = "{% macro round_money(value, precision=2) %}round({{ value }}, {{ precision }}){% endmacro %}"
 
 
-@pytest.mark.parametrize("dialect", ["duckdb", "postgres", "snowflake", "bigquery", "spark", "tsql"])
+@pytest.mark.parametrize("dialect", SQL_DIALECTS)
 def test_scalar_preview_restores_call_and_expansion_inlines_sql(native, dialect):
     put(native, "macros/money.sql", SCALAR)
     code = "select {{ round_money('amount', precision=3) }} as total from {{ ref('orders') }}"

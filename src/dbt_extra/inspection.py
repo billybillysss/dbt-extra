@@ -24,6 +24,7 @@ from dbt_extra.sql.relations import compile_relations
 from dbt_extra.sql.renderer import sql
 from dbt_extra.sql.qualification import INFER_SCHEMA_OPTIONS, bind_single_inputs
 from dbt_extra.sql.scopes import volatile
+from dbt_extra.sql.functions import has_generators
 
 
 def inspection_rules(tree):
@@ -32,7 +33,9 @@ def inspection_rules(tree):
     global_aggregate = any(isinstance(node, exp.Select) and not node.args.get("group")
                            and any(isinstance(p, exp.AggFunc) or p.find(exp.AggFunc) for p in node.selects)
                            for node in tree.walk())
-    projections = () if global_aggregate else (pushdown_projections,)
+    # QUALIFY aliases are retained below with unknown schemas; projection pruning
+    # must retain their definitions as well as their underlying window columns.
+    projections = () if global_aggregate or tree.find(exp.Qualify) else (pushdown_projections,)
     # Pruning exposes unused, cardinality-preserving joins. Remove their CTEs
     # before merging again so selected-output wrappers can also collapse.
     return (qualify, simplify, *projections, merge_subqueries,
@@ -107,8 +110,8 @@ def inspect(project, name, columns=None, *, boundaries=(), expanded=True, optimi
                             reason = "dynamic configuration; materialization cannot be established offline"
                         elif materialized not in {"view", "table", "ephemeral"}:
                             reason = f"{materialized} materialization"
-                        elif volatile(up.tree):
-                            reason = "volatile or unknown function"
+                        elif volatile(up.tree) or has_generators(up.tree):
+                            reason = "volatile, unknown or generator function"
                         else:
                             replacement = expand(upstream, (*active, r.id))
                     except SpecError as exc:
@@ -157,10 +160,14 @@ def inspect(project, name, columns=None, *, boundaries=(), expanded=True, optimi
                             for requested, actual in selected)).from_(complete.subquery(exp.to_identifier(alias, quoted=True)))
     else:
         tree = complete
-    if optimized and not volatile(tree):
+    if optimized and not volatile(tree) and not has_generators(tree):
         try:
             tree = optimize(bind_single_inputs(tree, {}, dialect), dialect=dialect, rules=inspection_rules(tree),
-                            **INFER_SCHEMA_OPTIONS, validate_qualify_columns=True)
+                            **INFER_SCHEMA_OPTIONS, validate_qualify_columns=True,
+                            # With unknown inputs SQLGlot cannot distinguish a
+                            # QUALIFY alias from an input column. Retain it rather
+                            # than guessing or expanding its window expression.
+                            expand_alias_refs=tree.find(exp.Qualify) is None)
         except SqlglotError as exc:
             issues.append({"resource_id": resource.id, "reason": f"Simplification unavailable; complete query retained: {exc}"})
             tree = exp.select(*(exp.alias_(exp.column(actual, table=alias, quoted=True), requested, quoted=True)

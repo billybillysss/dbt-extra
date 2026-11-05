@@ -5,8 +5,10 @@
 Run from the right directory or use
 `uv run extra --project-dir examples/jaffle_shop validate`. The global option comes
 before the command. The environment variable is exactly `EXTRA_PROJECT_DIR`.
-Tool settings are optional. `extra init DIRECTORY` adds settings to an existing
-dbt project.
+The selected directory must contain `dbt_project.yml`. Without an explicit
+directory, the nearest ancestor containing that file wins. Tool settings are
+optional and loaded only beside it. `extra --project-dir DIRECTORY init` adds
+settings to that root; `init` has no positional directory argument.
 
 ## `uv sync --locked` fails
 
@@ -20,7 +22,9 @@ dependencies.
 
 Use version-2 optional settings. Model/macro/snapshot paths belong in
 `dbt_project.yml`. Unknown settings and duplicate keys are errors.
-Use `optimization.preserve_macros: true`.
+Use `optimization.expand: false` to preserve macro calls (the default).
+For legacy `dbt.project_dir`, move `extra_project.yaml` beside the intended
+`dbt_project.yml`, remove that setting, and select the dbt root directly.
 See [configuration](reference/configuration.md).
 
 ## Inspection cannot resolve a query

@@ -12,6 +12,7 @@ from dbt_extra.inspection import inspect
 from dbt_extra.optimization import optimize
 from dbt_extra.project import Project
 from dbt_extra.sql import parse_authored, render
+from dbt_extra.sql.jinja import validate_template
 from dbt_extra.sql.macros import macro_calls, parse_model
 from dbt_extra.sql.references import resolve_ref
 from tests.helpers import invoke, optimizer_inputs, snapshot
@@ -50,7 +51,7 @@ def test_source_examples_really_rewrite_and_preserve_interfaces(demo, source_cha
         assert changes.optimization_report[model.id]["status"] == "rewritten", name
         before = parse_model(demo, model.code, expand=True)
         after = parse_model(demo, candidate, expand=True)
-        assert before.prefix == after.prefix
+        assert validate_template(before.prefix) == validate_template(after.prefix)
         assert before.config == after.config
         assert Counter(raw for _, _, raw, _ in macro_calls(candidate)) == Counter(
             raw for _, _, raw, _ in macro_calls(model.code))

@@ -6,7 +6,7 @@ inspection:
   optimize: true
 optimization:
   format: pretty
-  preserve_macros: true
+  expand: false
 export:
   output_dir: extra/review
   format: xlsx

@@ -4,16 +4,21 @@
 extra [--version] [--project-dir PATH] [--dialect DIALECT] [--manifest PATH] COMMAND
 ```
 
-`--project-dir` and the exact `EXTRA_PROJECT_DIR` environment variable select the
-project/settings directory. Settings and dbt projects without settings are
-also discovered by searching upward. dbt-extra never runs
-dbt or connects to a warehouse.
+Project selection is **`--project-dir` > `EXTRA_PROJECT_DIR` > nearest
+`dbt_project.yml` upward from the current directory**. Explicit directories must
+contain `dbt_project.yml`; optional `extra_project.yaml` is loaded only beside it.
+Global options go before the command. dbt-extra never runs dbt or connects to a warehouse.
+
+CLI input paths (`--project-dir`, `--manifest`, `import PATH`) and relative
+`EXTRA_PROJECT_DIR` values are relative to the current directory. Configured paths
+and export `--output-dir` / `--path` are relative to the project root; absolute
+paths stay absolute. See [configuration](configuration.md#relative-paths).
 
 ## Commands
 
 | Command | Purpose | Writes by default |
 | --- | --- | --- |
-| `init [DIRECTORY]` | Add optional version-2 settings to an existing dbt project | New settings only; refuses overwrite |
+| `init` | Add optional version-2 settings at the selected dbt root | New settings only; refuses overwrite |
 | `validate` | Check resource structure, Jinja structure, static SQL and reference cycles | No |
 | `inspect MODEL` | Explain full/selected-column definition SQL or logical plan | No |
 | `export` | Produce XLSX, CSV, or read-only JSON | Review outputs only; no pruning |
@@ -21,8 +26,12 @@ dbt or connects to a warehouse.
 | `optimize` | Conservative authored SQL rewriting | Selected `.sql` files |
 | `enrich` | Fill missing types/passthrough descriptions | dbt property YAML |
 
-Every writing command accepts `--preview` (`--dry-run` alias): show intended
+Every writing command accepts `--preview`: show intended
 outputs or source diffs without creating directories, temporary files or outputs.
+
+`init` uses the same discovery as every other command. Run `extra init --preview`
+inside a project, or `extra --project-dir PATH init --preview` from outside it.
+There is no positional directory argument.
 
 ## Select resources
 
@@ -90,13 +99,27 @@ format. See the [review contract](catalogs.md).
 ```bash
 extra optimize --select customer_revenue --format pretty --preview
 extra optimize --select customer_revenue --format compact --enrich true
+extra optimize --select macro_revenue --expand true --preview
 extra enrich --select customer_revenue --preview
 ```
 
-`--preserve-macro true` is the native safety invariant. Setting it false is an
-error: compiling/expanding a macro is not a reversible authored-source rewrite.
+`pretty` also formats leading Jinja `config()` calls with one argument per line
+and indented dictionaries/lists. `compact` keeps these calls on one line (except
+authored multiline strings). Quotes, values, key order, and dynamic expressions
+are preserved without evaluating Jinja; other Jinja calls are not reformatted.
+Unsupported config syntax is preserved unchanged.
+
+`--expand true|false` controls macro writeback (default: false). False preserves
+authored macro calls. True replaces statically resolvable local macros, including
+nested calls, literal-list loops, multiple-column output and SQL clauses, with SQL
+before optimization. Applying writes that SQL to the original model; `--preview`
+only shows the proposed diff. `ref()`, `source()` and `config()` remain authored;
+upstream model SQL is not inlined. Unsupported/runtime-dependent macros skip the
+whole model unchanged with a reason. Macro definition files are not edited.
 Optimization never requires compiled SQL. Enrichment reports inferred and
 unresolved properties and never overwrites existing authored values.
+See [SQL functions](sql-functions/README.md) for implemented Spark/T-SQL gaps and verified examples
+and the distinction between parsing, type inference and safe rewriting.
 
 Offline `validate` is not `dbt parse`, `dbt compile`, `dbt build`, warehouse SQL
 validation, or an enforced-contract check. Unsupported analysis is explicitly

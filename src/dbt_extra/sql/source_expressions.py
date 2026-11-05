@@ -3,6 +3,8 @@
 from sqlglot import exp
 from sqlglot.optimizer.scope import traverse_scope
 
+from dbt_extra.sql.dialects import INTEGER_ADD_ZERO_DIALECTS, INTEGER_LITERAL_FOLD_DIALECTS
+
 
 def _integer(node):
     if isinstance(node, exp.Literal) and node.is_int:
@@ -43,14 +45,14 @@ def simplify_source_expressions(tree, dialect, *, schema=None, macros=()):
         replacement = None
         if isinstance(node, (exp.Add, exp.Sub, exp.Mul)):
             a, b = _integer(node.this), _integer(node.expression)
-            if a is not None and b is not None and dialect in {"duckdb", "postgres", "spark", "tsql", "bigquery"}:
+            if a is not None and b is not None and dialect in INTEGER_LITERAL_FOLD_DIALECTS:
                 value = a + b if isinstance(node, exp.Add) else a - b if isinstance(node, exp.Sub) else a * b
                 # Keep both the literal type class and runtime overflow behavior.
                 if 0 <= value <= 2147483647:
                     replacement = exp.Literal.number(value)
             # DuckDB INT/BIGINT + integer zero keeps the exact input type. Do not
             # generalize to DECIMAL, unknown types, computed inputs or dialects.
-            elif (dialect == "duckdb" and isinstance(node, exp.Add) and b == 0
+            elif (dialect in INTEGER_ADD_ZERO_DIALECTS and isinstance(node, exp.Add) and b == 0
                   and isinstance(node.this, exp.Column)
                   and types.get(id(node.this)) in (exp.DataType.build("INT"), exp.DataType.build("BIGINT"))):
                 replacement = node.this.copy()

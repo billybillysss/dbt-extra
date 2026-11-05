@@ -79,7 +79,7 @@ extra --project-dir examples/jaffle_shop optimize --select customer_revenue
 
 Preview shows a diff of the actual source file and writes nothing. Applying the
 command changes that same authored `.sql` file. Files under `target/compiled`
-are not edited. `--dry-run` is an alias for `--preview`.
+are not edited. `--preview` is the only no-write flag.
 
 Literal leading `config`, static `ref` (including package/version arguments),
 `source`, and supported relation-position `this` are reversibly masked, not
@@ -96,7 +96,7 @@ simplification and repeated deterministic subquery factoring also apply to sourc
 SQL. Other unsupported correlated shapes still skip. No `dbt compile` is required.
 Existing compiled artifacts are never a rewrite input.
 
-Supported scalar macros are validated by bounded static expansion. A guarded
+By default (`--expand false`), supported scalar macros are validated by bounded static expansion. A guarded
 source rule removes unused columns and grouped aggregates using expanded
 dependencies, including identifiers hidden in macro arguments; exact macro calls
 remain authored. Independent local constants and Boolean identities can simplify
@@ -111,6 +111,19 @@ schemas where needed, never assumed-complete documentation columns. See
 [source optimizer safety](source-optimizer-safety.md) for schema evidence,
 rewrite boundaries, fixed-point checks, conflict protection, and validation details.
 
+To replace macro calls in model files with expanded SQL, use:
+
+```bash
+extra --project-dir examples/jaffle_shop optimize --select macro_revenue --expand true --preview
+```
+
+Omit `--preview` to apply the expanded, optimized SQL. Expansion supports bounded
+static local macros, including nested calls, multiple-column/SQL-clause output and
+literal-list loops. `ref()`, `source()` and `config()` stay authored; upstream model
+definitions are not inlined and macro definition files are unchanged. Unsupported
+macros skip the entire model rather than writing a partial expansion. The same
+binding, comment, interface and fixed-point guards apply after expansion.
+
 ## Enrich metadata
 
 `extra enrich --preview` fills missing statically inferred column types and
@@ -123,6 +136,11 @@ updated. Models without one are skipped with a reason; add an entry in dbt first
 No properties file is created automatically. Existing semantic-model, entity,
 dimension and metric definitions are preserved, not inferred or converted.
 The dbt Semantic Layer is not required for ordinary SQL inspection or enrichment.
+
+SQL-function type inference is dialect-aware and best-effort. See
+[SQL-function enrichment](../reference/sql-functions/README.md) for verified Spark and
+T-SQL examples, input-schema requirements, unresolved cases and how coverage grows.
+Recognizing a function is not a guarantee of inferring its type or safely rewriting it.
 
 After review, run dbt's own parsing, tests and builds independently. Logical
 equivalence checks, metadata inference, executed data tests and warehouse

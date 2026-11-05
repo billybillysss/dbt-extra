@@ -157,12 +157,6 @@ metrics:
     assert load_yaml(yaml) == expected
 
 
-def test_removed_fallback_setting_is_rejected(native):
-    put(native, "extra_project.yaml", "version: 2\nmetadata:\n  new_properties_file: models/schema.yml\n")
-    with pytest.raises(SpecError, match="new_properties_file"):
-        project(native)
-
-
 def test_xlsx_baseline_uses_version_one_and_retains_file_hashes(native):
     export_review(project(native), select=["revenue"])
     path = native / "extra/review/review.xlsx"

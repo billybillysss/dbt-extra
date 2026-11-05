@@ -114,7 +114,7 @@ caught. Skipped models have no proposed SQL write; other selected models continu
 
 ## Macros, preview, and conflicts
 
-Supported scalar macros are inspected through bounded static expansion. A separate,
+By default (`--expand false`), supported scalar macros are inspected through bounded static expansion. A separate,
 narrow pruning rule uses expanded, qualified dependencies to remove dead authored
 columns and grouped aggregates, including identifiers hidden in macro string
 arguments. This pruning rule deletes projections only; a separate local expression
@@ -127,8 +127,16 @@ shared consumers, window dependencies, HAVING, filters, and limits are retained.
 For example, the leaderboard can drop unused `largest_order` and
 `returned_order_count` aggregates without changing its ranking or final limit.
 Other unsupported shapes remain formatting-only. Raw custom macro call text and counts
-must survive. SQL-fragment macros skip; source optimization never permanently
-inlines macros and has no `optimize --expand` option.
+must survive. SQL-fragment macros skip in this default preservation mode.
+
+`optimize --expand true` (or `optimization.expand: true`) explicitly replaces supported
+local macro calls with SQL before applying the ordinary source rewrite rules.
+This also supports static multiple-column and SQL-clause output, not just scalar
+macros. Relation/config templates remain authored and upstream models are not
+inlined. Unsupported calls skip the whole model unchanged; no partial expansion
+is written. Expanded queries still pass binding, output-interface, comment,
+render/reparse and fixed-point checks. Expansion is reported as a structural rewrite
+even if no further SQL simplification occurs. Macro definition files are unchanged.
 
 The static allowlist includes argument-free string `upper`, `lower`, and `trim`
 methods/filters, flat tuple-unpacking literal loops, same-type string/numeric/
@@ -151,15 +159,18 @@ and do not imply that independent safe local rewrites were disabled.
 
 ## Dialect selection
 
-Adapter autodetection maps `fabricspark` to the SQLGlot `spark` dialect. Explicit
-CLI and configuration dialect overrides retain priority.
+Adapter autodetection maps `fabricspark` to SQLGlot `spark` and `sqlserver` to
+`tsql`. Fabric Warehouse retains its dedicated `fabric` dialect, not `tsql`.
+Explicit CLI and configuration dialect overrides retain priority. Parser support
+does not grant dialect-specific arithmetic rewrite permissions; related dialects
+stay excluded until their semantics are tested. See [dialect coverage](../compatibility.md#sql-dialects).
 
 ## Regression coverage
 
 The [source optimizer tests](../../tests/sql/test_source_optimization.py) cover
 AST bindings, DuckDB output labels, exact types (including decimal precision/scale)
 and row multisets (including duplicates, NULLs, empty/unmatched inputs), overflow
-and conversion-error retention, ordered results, six SQL dialects, macro
+and conversion-error retention, ordered results, seven SQL dialects, macro
 preservation, preview byte identity, conflicts, and idempotence. Write-mode tests
 use temporary project copies.
 

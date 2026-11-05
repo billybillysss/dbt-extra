@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-
-from sqlglot.dialects import Dialect
 
 from dbt_extra.config import options, resolve_project, strings, validate_settings
 from dbt_extra.errors import SpecError
@@ -14,28 +11,19 @@ from dbt_extra.files.yaml import fields, load_yaml, mapping
 from dbt_extra.project.artifacts import load_artifact
 from dbt_extra.project.discovery import discover
 from dbt_extra.project.selectors import select
+from dbt_extra.sql.dialects import resolve_dialect
 
 
 class Project:
     def __init__(self, directory=None, *, dialect=None, manifest=None):
-        config_path = resolve_project(directory)
-        explicit = directory is not None or os.environ.get("EXTRA_PROJECT_DIR") is not None
-        if not config_path.is_file() and not explicit:
-            for parent in (Path.cwd(), *Path.cwd().parents):
-                if (parent / "dbt_project.yml").is_file():
-                    config_path = parent / "extra_project.yaml"
-                    break
-        self.config_path = config_path.resolve()
-        self.base = self.config_path.parent
+        self.root = resolve_project(directory)
+        self.config_path = self.root / "extra_project.yaml"
+        safe_path(self.config_path)
         self.config_content = self.config_path.read_bytes() if self.config_path.is_file() else None
         self.settings = load_yaml(self.config_path, {self.config_path: self.config_content}) if self.config_content is not None else {}
         validate_settings(self.settings)
         dbt = self.settings.get("dbt", {})
-        self.root = (self.base / dbt.get("project_dir", ".")).resolve()
         project_file = self.root / "dbt_project.yml"
-        safe_path(project_file)
-        if not project_file.is_file():
-            raise SpecError(f"No dbt_project.yml found in {self.root}; supply --project-dir")
         self.contents = {project_file: project_file.read_bytes(), self.config_path: self.config_content}
         self.authored = load_yaml(project_file, self.contents)
         self.name = self.authored.get("name")
@@ -54,11 +42,7 @@ class Project:
             raise SpecError(f"Manifest project {artifact_project!r} does not match dbt project {self.name!r}")
         self.catalog = load_artifact((self.root / artifacts["catalog"]).resolve(), required=True, contents=self.contents) if artifacts.get("catalog") else {}
         adapter = self.manifest.get("metadata", {}).get("adapter_type")
-        self.dialect = dialect or self.settings.get("analysis", {}).get("dialect", "auto")
-        if self.dialect == "auto":
-            self.dialect = {"databricks": "databricks", "postgres": "postgres", "sqlserver": "tsql", "fabricspark": "spark"}.get(adapter, adapter)
-        if self.dialect:
-            Dialect.get_or_raise(self.dialect)
+        self.dialect = resolve_dialect(dialect or self.settings.get("analysis", {}).get("dialect", "auto"), adapter=adapter)
         self.resources = {}
         self.diagnostics = []
         discover(self)

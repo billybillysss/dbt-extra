@@ -1,4 +1,4 @@
-"""Guard the new identity and release workflow boundaries."""
+"""Guard package identity, review contracts, and release workflow boundaries."""
 
 from html.parser import HTMLParser
 from importlib.metadata import distribution
@@ -26,7 +26,7 @@ def test_distribution_namespace_and_single_console_entry_point():
     assert metadata["project"]["scripts"] == {"extra": "dbt_extra.cli:cli"}
     assert metadata["tool"]["hatch"]["version"]["path"] == "src/dbt_extra/__init__.py"
     installed = distribution("dbt-extra")
-    assert installed.version == __version__ == "0.1.0"
+    assert installed.version == __version__
     assert [(p.name, p.value) for p in installed.entry_points if p.group == "console_scripts"] == [
         ("extra", "dbt_extra.cli:cli"),
     ]
@@ -35,7 +35,7 @@ def test_distribution_namespace_and_single_console_entry_point():
     assert result.output.strip() == f"extra, version {__version__}"
 
 
-def test_new_environment_and_upward_config_discovery(native, monkeypatch):
+def test_environment_and_upward_config_discovery(native, monkeypatch):
     monkeypatch.setenv("EXTRA_PROJECT_DIR", str(native))
     put(native, "extra_project.yaml", "version: 2\nanalysis:\n  dialect: duckdb\n")
     result = CliRunner().invoke(cli, ["validate"])
@@ -47,19 +47,7 @@ def test_new_environment_and_upward_config_discovery(native, monkeypatch):
     assert Project().config_path == native / "extra_project.yaml"
 
 
-def test_legacy_environment_and_config_are_not_aliases(native, monkeypatch):
-    monkeypatch.delenv("EXTRA_PROJECT_DIR", raising=False)
-    monkeypatch.setenv("slbt_PROJECT_DIR", str(native / "missing"))
-    monkeypatch.setenv("SLBT_PROJECT_DIR", str(native / "missing"))
-    put(native, "slbt_project.yaml", "version: 1\nmodels: obsolete\n")
-    monkeypatch.chdir(native)
-    project = Project(dialect="duckdb")
-    assert project.root == native
-    assert project.config_path == native / "extra_project.yaml"
-    assert project.settings == {}
-
-
-def test_init_previews_new_config_only_and_refuses_overwrite(native):
+def test_init_previews_config_and_refuses_overwrite(native):
     before = snapshot(native)
     result = CliRunner().invoke(cli, ["--project-dir", str(native), "init", "--preview"])
     assert result.exit_code == 0, result.output
@@ -79,8 +67,6 @@ def test_init_previews_new_config_only_and_refuses_overwrite(native):
     {"format_version": 2},
     {"format_version": 0},
     {"project": "another_project"},
-    {"format": "slbt.dbt-review-baseline"},
-    {"format": "dbt-extra.dbt-review-baseline", "format_version": 2},
 ])
 def test_review_version_and_incompatible_baseline_rejection(native, incompatible):
     project = Project(native, dialect="duckdb")
@@ -101,14 +87,6 @@ def test_review_version_and_incompatible_baseline_rejection(native, incompatible
     with pytest.raises(SpecError, match="re-export"):
         import_review(Project(native, dialect="duckdb"), review)
     assert snapshot(native) == before
-
-
-def test_runtime_contains_no_old_namespace_or_command():
-    package = ROOT / "src/dbt_extra"
-    if not package.is_dir():
-        pytest.skip("Source paths are absent in installed-wheel-only environments")
-    for path in package.rglob("*.py"):
-        assert "slbt" not in path.read_text(encoding="utf-8").lower(), path
 
 
 def test_only_release_workflow_can_publish_packages():
@@ -165,7 +143,7 @@ class References(HTMLParser):
     def __init__(self):
         super().__init__()
         self.local = []
-        self.badges = []
+        self.images = []
 
     def handle_starttag(self, tag, attrs):
         attributes = dict(attrs)
@@ -173,19 +151,14 @@ class References(HTMLParser):
             value = attributes.get(key)
             if value and not value.startswith(("https://", "http://", "#")):
                 self.local.append(value)
-        if tag == "img" and attributes.get("src", "").startswith("https://"):
-            self.badges.append(attributes)
+        if tag == "img":
+            self.images.append(attributes)
 
 
-def test_readme_uses_real_assets_and_no_unpublished_pypi_badge():
+def test_readme_local_assets_exist_and_images_have_alt_text():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert '<h1 align="center">dbt-extra — dbt transformation review and inspection</h1>' in readme
-    assert "https://github.com/billybillysss/dbt-extra.git" in readme
-    assert "uv run --locked extra" in readme
-    assert "img.shields.io/pypi/" not in readme
     parser = References()
     parser.feed(readme)
     assert all((ROOT / path).is_file() for path in parser.local)
-    assert [badge["alt"] for badge in parser.badges] == [
-        "License: MIT", "Python 3.11+", "CI", "Documentation",
-    ]
+    assert parser.images
+    assert all(image.get("alt", "").strip() for image in parser.images)

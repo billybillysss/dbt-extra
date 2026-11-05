@@ -15,7 +15,7 @@ from dbt_extra.sql.parser import parse_authored
 from dbt_extra.sql.schema_evidence import SourceSchemas
 from dbt_extra.sql.shorthand import output_spans
 from dbt_extra.sql.source_rules import collapse_complementary_union, decorrelate_filter_exists, short_names
-from tests.helpers import invoke, project, put, snapshot
+from tests.helpers import SQL_DIALECTS, invoke, project, put, snapshot
 
 
 SCHEMA = {
@@ -94,8 +94,8 @@ def test_results_labels_duplicates_nulls_empty_and_order(code, empty):
         assert optimize_source(candidate, "duckdb", schema=SCHEMA) == candidate
 
 
-@pytest.mark.parametrize("dialect", ["duckdb", "postgres", "snowflake", "bigquery", "spark", "tsql"])
-def test_renamed_cte_ast_bindings_and_six_dialects(dialect):
+@pytest.mark.parametrize("dialect", SQL_DIALECTS)
+def test_renamed_cte_ast_bindings_across_dialects(dialect):
     candidate = optimize_source(RENAMED, dialect)
     tree = parse_authored(candidate, dialect).tree
     bindings = {p.output_name.lower(): (p.this.table, p.this.name) for p in tree.selects}
@@ -193,7 +193,7 @@ def test_preserves_authored_spelling_names_comments_and_config():
     code = "{{ config(materialized='view') }}\n-- explanation\nselect T.UpperCase as OutputName from MyTable T"
     candidate = optimize_source(code, "duckdb")
     assert "T.UpperCase AS OutputName" in candidate and "MyTable AS T" in candidate
-    assert candidate.count("{{ config(materialized='view') }}") == 1
+    assert candidate.count("{{ config(\n    materialized='view'\n) }}") == 1
     assert "explanation" in candidate
     assert optimize_source(candidate, "duckdb") == candidate
 
@@ -481,16 +481,21 @@ MACRO_QUERIES = [
 
 @pytest.mark.parametrize("empty", [False, True])
 @pytest.mark.parametrize("code", MACRO_QUERIES)
-def test_macro_pruning_preserves_rows_and_barrier_dependencies(native, code, empty):
+@pytest.mark.parametrize("expand", [False, True])
+def test_macro_pruning_preserves_rows_and_barrier_dependencies(native, code, empty, expand):
     put(native, "macros/value.sql", "{% macro twice(value) %}{{ value }} + {{ value }}{% endmacro %}")
     path = put(native, "models/macro_safety.sql", code)
     p = project(native)
-    changes, skipped = optimize(p, select=["macro_safety"])
+    changes, skipped = optimize(p, select=["macro_safety"], expand=expand)
     assert not skipped
     candidate = changes.after[path].decode()
     from dbt_extra.sql.macros import macro_calls
-    assert Counter(raw for _, _, raw, _ in macro_calls(code)) == Counter(
-        raw for _, _, raw, _ in macro_calls(candidate))
+    if expand:
+        assert not macro_calls(candidate)
+        assert changes.optimization_report["model.shop.macro_safety"]["status"] == "rewritten"
+    else:
+        assert Counter(raw for _, _, raw, _ in macro_calls(code)) == Counter(
+            raw for _, _, raw, _ in macro_calls(candidate))
 
     def executable(text):
         parsed = parse_model(p, text, expand=True)
@@ -505,7 +510,7 @@ def test_macro_pruning_preserves_rows_and_barrier_dependencies(native, code, emp
             con.execute("insert into orders values (1,2),(1,2),(2,2),(3,null),(null,4),(4,0)")
         assert result(con, executable(code)) == result(con, executable(candidate))
     changes.apply()
-    second, skipped = optimize(project(native), select=["macro_safety"])
+    second, skipped = optimize(project(native), select=["macro_safety"], expand=expand)
     assert not skipped and not second.changed()
 
 
@@ -524,7 +529,7 @@ SOURCE_RULES = {
 }
 
 
-@pytest.mark.parametrize("dialect", ["duckdb", "postgres", "snowflake", "bigquery", "spark", "tsql"])
+@pytest.mark.parametrize("dialect", SQL_DIALECTS)
 @pytest.mark.parametrize("rule", SOURCE_RULES)
 def test_guarded_source_rules_rewrite_roundtrip_and_converge(rule, dialect):
     code = SOURCE_RULES[rule]

@@ -98,7 +98,7 @@ def smoke_cli(version):
         (project / "models").mkdir(parents=True)
         (project / "dbt_project.yml").write_text("name: smoke\nversion: '1.0'\n", encoding="utf-8")
         (project / "models/example.sql").write_text("select 1 + 0 as id\n", encoding="utf-8")
-        run("--dialect", "duckdb", "init", "project")
+        run("--project-dir", "project", "--dialect", "duckdb", "init")
         run("--project-dir", "project", "validate")
         run("--project-dir", "project", "inspect", "example", "--columns", "id")
         run("--project-dir", "project", "optimize", "--preview")

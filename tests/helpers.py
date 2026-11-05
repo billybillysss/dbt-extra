@@ -11,6 +11,10 @@ from dbt_extra.cli import cli
 from dbt_extra.project import Project
 
 
+SQL_DIALECTS = ("duckdb", "postgres", "snowflake", "bigquery", "spark", "tsql", "fabric",
+                "databricks", "redshift", "trino", "athena")
+
+
 def put(root, path, value):
     target = root / path
     target.parent.mkdir(parents=True, exist_ok=True)

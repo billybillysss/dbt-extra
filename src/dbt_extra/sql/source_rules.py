@@ -122,7 +122,7 @@ def decorrelate_filter_exists(tree):
                 continue
             inner = term.this
             if (not isinstance(inner, exp.Select)
-                    or any(v is not None for k, v in inner.args.items()
+                    or any(v is not None and not (k == "exclude" and v == []) for k, v in inner.args.items()
                            if k not in {"expressions", "from_", "where"})
                     or len(inner.selects) != 1 or inner.selects[0] != exp.Literal.number(1)):
                 continue

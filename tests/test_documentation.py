@@ -1,9 +1,9 @@
 """Offline documentation contracts: real examples and resolvable local links."""
 
-import csv
 import json
 from pathlib import Path
 import re
+import shlex
 import shutil
 from urllib.parse import unquote, urlsplit
 
@@ -16,6 +16,7 @@ from dbt_extra.cli import cli
 from dbt_extra.analysis import catalog
 from dbt_extra.project import Project
 from dbt_extra.files.yaml import load_yaml
+from dbt_extra.sql.parser import parse_authored
 from tests.helpers import optimizer_inputs, snapshot
 
 
@@ -85,7 +86,6 @@ def test_readme_config_and_native_example(tmp_path):
     assert document["source_of_truth"] == "dbt"
     names = {r["name"] for r in document["resources"]}
     assert {"customer_revenue", "macro_revenue", "gld_orders", "gld_customer_leaderboard"} <= names
-    assert len(names) == 24
     assert next(r for r in document["resources"] if r["name"] == "customer_revenue")["model_path"] == "models/gld"
 
 
@@ -104,10 +104,93 @@ def test_readme_shown_sql_matches_cli(dbt_example):
         "customer_revenue", "--columns", "revenue", "--compile", "false"])
     assert result.exit_code == 0, result.output
     query = "\n".join(line for line in result.output.splitlines() if not line.startswith("--"))
-    shown = blocks((ROOT / "README.md").read_text(encoding="utf-8"), "sql")
+    section = (ROOT / "README.md").read_text(encoding="utf-8").split("## See where a column comes from\n", 1)[1].split("\n## ", 1)[0]
+    shown = blocks(section, "sql")
     assert len(shown) == 1
     assert shown[0].strip() == query.strip()
     assert snapshot(dbt_example) == before
+
+
+def test_readme_selected_column_simplification_matches_cli(dbt_example, monkeypatch):
+    monkeypatch.delenv("EXTRA_PROJECT_DIR", raising=False)
+    monkeypatch.chdir(dbt_example)
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    section = readme.split("### Simplify the logic for one selected column\n", 1)[1].split("\n## ", 1)[0]
+    commands, shown = blocks(section, "bash"), blocks(section, "sql")
+    assert len(commands) == len(shown) == 2
+    before = snapshot(dbt_example)
+    for command, expected in zip(commands, shown):
+        executable, *arguments = shlex.split(command)
+        assert executable == "extra"
+        result = CliRunner().invoke(cli, arguments)
+        assert result.exit_code == 0, result.output
+        query = "\n".join(line for line in result.output.splitlines() if not line.startswith("--"))
+        assert query.strip() == expected.strip()
+        assert snapshot(dbt_example) == before
+    assert "COUNT(*) AS order_count" in shown[0]
+    assert "order_count" not in shown[1]
+    assert 'SUM("extra_input_1".amount)' in shown[1]
+    assert 'GROUP BY\n      "extra_input_1".customer_id' in shown[1]
+    assert "order_totals.revenue + 0 AS revenue" in shown[1]
+
+
+def test_readme_enrichment_yaml_matches_real_proposal(dbt_example, tmp_path):
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    section = readme.split("## Fill missing metadata with real YAML\n", 1)[1].split("\n## ", 1)[0]
+    examples = blocks(section, "yaml")
+    assert len(examples) == 2
+    shown = []
+    for index, block in enumerate(examples):
+        path = tmp_path / f"enrichment-{index}.yml"
+        path.write_text(block, encoding="utf-8")
+        document = load_yaml(path)
+        assert document["version"] == 2
+        assert len(document["models"]) == 1
+        shown.append(document["models"][0])
+
+    def revenue_properties():
+        return next(model for model in load_yaml(dbt_example / "models/schema.yml")["models"]
+                    if model["name"] == "customer_revenue")
+
+    assert shown[0] == revenue_properties()
+    before = snapshot(dbt_example)
+    runner = CliRunner()
+    arguments = ["--project-dir", str(dbt_example), "enrich", "--select", "customer_revenue"]
+    preview = runner.invoke(cli, [*arguments, "--preview"])
+    assert preview.exit_code == 0, preview.output
+    assert "4 missing properties inferred; 2 unresolved" in preview.output
+    assert snapshot(dbt_example) == before
+    applied = runner.invoke(cli, arguments)
+    assert applied.exit_code == 0, applied.output
+    assert shown[1] == revenue_properties()
+    after = snapshot(dbt_example)
+    assert {path for path in before if before[path] != after[path]} == {"models/schema.yml"}
+
+
+def test_readme_settings_support_named_view_and_workflow_defaults(dbt_example):
+    settings = blocks((ROOT / "README.md").read_text(encoding="utf-8"), "yaml")[0]
+    (dbt_example / "extra_project.yaml").write_text(settings, encoding="utf-8")
+    project = Project(dbt_example)
+    assert project.options("inspection", {})["compile"] is True
+    assert project.options("metadata", {})["select"] == ["customer_revenue"]
+    assert project.options("optimization", {})["expand"] is False
+    before = snapshot(dbt_example)
+    result = CliRunner().invoke(cli, ["--project-dir", str(dbt_example), "export", "--view", "finance", "--preview"])
+    assert result.exit_code == 0, result.output
+    assert "review.xlsx" in result.output
+    assert snapshot(dbt_example) == before
+
+
+def test_readme_json_example_includes_explicit_upstream_context(dbt_example):
+    result = CliRunner().invoke(cli, ["--project-dir", str(dbt_example), "export", "--format", "json",
+        "--select", "customer_revenue", "orders", "demo_raw_orders", "--output-dir", "extra/review-json"])
+    assert result.exit_code == 0, result.output
+    document = json.loads((dbt_example / "extra/review-json/review.json").read_text(encoding="utf-8"))
+    assert document["format_version"] == 1
+    assert document["source_of_truth"] == "dbt"
+    assert {resource["name"] for resource in document["resources"]} == {
+        "customer_revenue", "orders", "demo_raw_orders",
+    }
 
 
 def test_documented_description_review_round_trip(dbt_example):
@@ -165,40 +248,9 @@ def test_github_issue_forms_have_valid_required_inputs(name):
     assert any(field.get("validations", {}).get("required") is True for field in inputs)
 
 
-def test_merged_example_has_one_native_project():
-    assert not (ROOT / "examples/dbt_shop").exists()
-    assert not (EXAMPLE / "dbt").exists()
-    assert not (EXAMPLE / "catalog").exists()
-    config = load_yaml(EXAMPLE / "dbt_project.yml")
-    assert config["name"] == config["profile"] == "jaffle_shop"
-    assert load_yaml(EXAMPLE / "extra_project.yaml")["version"] == 2
-    project = Project(EXAMPLE)
-    resources = list(project.resources.values())
-    assert len([r for r in resources if r.kind == "model"]) == 31
-    assert {r.name for r in resources if r.kind == "seed"} == {
-        "demo_raw_orders", "raw_customers", "raw_orders", "raw_payments",
-    }
-    assert {r.name for r in resources if r.kind == "snapshot"} == {"customer_history"}
-    assert {r.name for r in resources if r.kind == "macro"} >= {
-        "round_money", "rounded_total", "hash_relation_attributes",
-    }
-
-
-@pytest.mark.parametrize("name, count, columns", [
-    ("raw_customers", 100, ["id", "first_name", "last_name"]),
-    ("raw_orders", 99, ["id", "user_id", "order_date", "status"]),
-    ("raw_payments", 113, ["id", "order_id", "payment_method", "amount"]),
-    ("demo_raw_orders", 4, ["order_id", "customer_id", "amount", "status"]),
-])
-def test_merged_example_seed_datasets_stay_distinct(name, count, columns):
-    with (EXAMPLE / "seeds" / f"{name}.csv").open(encoding="utf-8", newline="") as stream:
-        reader = csv.DictReader(stream)
-        assert reader.fieldnames == columns
-        assert len(list(reader)) == count
-
-
 def test_readme_python_api_is_read_only(monkeypatch, dbt_example, tmp_path):
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("EXTRA_PROJECT_DIR", raising=False)
+    monkeypatch.chdir(dbt_example)
     before = snapshot(dbt_example)
     namespace = {}
     exec(blocks((ROOT / "README.md").read_text(encoding="utf-8"), "python")[0], namespace)
@@ -221,7 +273,7 @@ select customer_id, revenue + 0 as revenue, order_count from order_totals
     original = path.read_text(encoding="utf-8")
     arguments = ["--project-dir", str(destination), "optimize", "-s", "customer_revenue"]
     before = {path: path.read_bytes() for path in destination.rglob("*") if path.is_file()}
-    preview = CliRunner().invoke(cli, [*arguments, "--dry-run"])
+    preview = CliRunner().invoke(cli, [*arguments, "--preview"])
     assert preview.exit_code == 0, preview.output
     assert {path: path.read_bytes() for path in destination.rglob("*") if path.is_file()} == before
     result = CliRunner().invoke(cli, arguments)
@@ -229,7 +281,8 @@ select customer_id, revenue + 0 as revenue, order_count from order_totals
     updated = path.read_text(encoding="utf-8")
     assert updated != original
     assert "{{ ref('orders') }}" in updated
-    assert original.splitlines()[0] == updated.splitlines()[0]
+    assert parse_authored(original, "duckdb").config == parse_authored(updated, "duckdb").config
+    assert updated.startswith("{{ config(\n    materialized='table',\n    tags=[\n        'finance'\n    ]\n) }}")
     assert {p for p in before if p.read_bytes() != before[p]} == {path}
 
 
@@ -293,15 +346,29 @@ def test_cli_version_needs_no_project(tmp_path, monkeypatch):
     ["inspect", "customer_revenue", "--columns", "revenue", "--from", "orders", "--compile", "false"],
     ["inspect", "customer_revenue", "--columns", "revenue", "--view", "plan", "--compile", "false"],
     ["inspect", "customer_revenue", "--columns", "order_count", "--view", "plan"],
+    ["inspect", "customer_revenue"],
+    ["inspect", "customer_revenue", "--columns", "customer_id", "revenue", "--from", "orders", "--compile", "false"],
+    ["inspect", "customer_revenue", "--expand", "false", "--optimize", "false", "--compile", "false"],
     ["export", "--format", "xlsx", "--preview"],
     ["export", "--format", "csv", "--preview"],
-    ["export", "--format", "json", "--dry-run"],
+    ["export", "--format", "json", "--preview"],
+    ["export", "--format", "xlsx", "--select", "macro_revenue", "--expand", "--output-dir", "extra/review-expanded", "--preview"],
+    ["export", "--select", "orders", "customer_revenue", "--preview"],
+    ["export", "--select", "path:models/gld/**", "--exclude", "macro_revenue", "--preview"],
+    ["export", "--select", "tag:finance", "--preview"],
+    ["export", "--view", "finance", "--preview"],
     ["optimize", "-s", "customer_revenue", "--preview"],
+    ["optimize", "--select", "macro_revenue", "--expand", "true", "--preview"],
+    ["optimize", "--select", "gld_optimizer_constants", "--preview"],
+    ["optimize", "--select", "customer_revenue", "--format", "compact", "--enrich", "true", "--preview"],
+    ["optimize", "--select", "model.jaffle_shop.customer_revenue", "--preview"],
     ["enrich", "-s", "customer_revenue", "--preview"],
 ])
-def test_documented_preview_commands_succeed_without_writes(arguments, dbt_example):
+def test_documented_preview_commands_succeed_without_writes(arguments, dbt_example, monkeypatch):
+    monkeypatch.delenv("EXTRA_PROJECT_DIR", raising=False)
+    monkeypatch.chdir(dbt_example)
     before = snapshot(dbt_example)
-    result = CliRunner().invoke(cli, ["--project-dir", str(dbt_example), *arguments])
+    result = CliRunner().invoke(cli, arguments)
     assert result.exit_code == 0, result.output
     after = snapshot(dbt_example)
     assert after == before

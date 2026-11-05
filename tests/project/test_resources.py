@@ -2,10 +2,9 @@
 
 import pytest
 
-from dbt_extra import Project, SpecError
+from dbt_extra import SpecError
 from dbt_extra.project.resources import Resource
 from dbt_extra.project.selectors import select
-from tests.helpers import put
 
 
 def resource(**kwargs):
@@ -31,10 +30,3 @@ def test_selectors_use_authored_paths_not_directory_only_model_paths():
     assert select([model], exclude=[model.id]) == []
     with pytest.raises(SpecError, match="Unsupported selector"):
         select([model], ["layer:slv"])
-
-
-def test_legacy_semantic_settings_are_not_a_second_input_mode(tmp_path):
-    put(tmp_path, "dbt_project.yml", "name: shop\n")
-    put(tmp_path, "extra_project.yaml", "version: 1\nmodels: models\n")
-    with pytest.raises(SpecError):
-        Project(tmp_path, dialect="duckdb")

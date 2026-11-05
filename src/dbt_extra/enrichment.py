@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 
 from sqlglot import exp
+from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
 
 from dbt_extra.analysis import analyze
 from dbt_extra.files.changes import ChangeSet, digest
@@ -38,6 +39,12 @@ def enrich(project, *, select=None, exclude=None, changes=None):
             if not props.get("data_type") and item.get("inferred_type"):
                 props["data_type"] = item["inferred_type"]
             projection = output.get(name)
+            if projection is None:
+                key = normalize_identifiers(exp.to_identifier(name), dialect=project.dialect).name
+                matches = [p for p in output.values()
+                           if normalize_identifiers(p.copy(), dialect=project.dialect).output_name == key]
+                if len(matches) == 1:
+                    projection = matches[0]
             expression = projection.this if isinstance(projection, exp.Alias) else projection
             # Only bare passthrough/renamed columns inherit a description. The
             # lineage relation must resolve uniquely; transformed values do not.

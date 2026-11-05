@@ -8,6 +8,7 @@ from sqlglot.optimizer.scope import traverse_scope
 
 from dbt_extra.errors import SpecError
 from dbt_extra.files.changes import ChangeSet, digest
+from dbt_extra.sql.dialects import validate_dialect
 from dbt_extra.sql.macros import macro_calls, parse_model
 from dbt_extra.sql.parser import parse_authored
 from dbt_extra.sql.qualification import qualify_source, remember_schema_outputs, source_schema
@@ -27,8 +28,8 @@ def _optimizer_call(function, *args, **kwargs):
         raise SpecError(f"Cannot safely optimize ({type(exc).__name__}: {exc}); verify complete input schemas and SQLGlot compatibility") from exc
 
 
-def _once(code, dialect, *, schema, pretty, project=None, evidence=None, report=None):
-    parse = (lambda text: parse_model(project, text)) if project else (lambda text: parse_authored(text, dialect))
+def _once(code, dialect, *, schema, pretty, project=None, evidence=None, report=None, expand=False):
+    parse = (lambda text: parse_model(project, text, expand=expand)) if project else (lambda text: parse_authored(text, dialect))
     parsed = parse(code)
     expanded = parse_model(project, code, expand=True) if parsed.macros else parsed
     if volatile(expanded.tree):
@@ -81,7 +82,7 @@ def _once(code, dialect, *, schema, pretty, project=None, evidence=None, report=
     after_comments = sorted(c for n in result.walk() for c in n.comments or [])
     if before_comments != after_comments:
         raise SpecError("Rewrite would discard SQL comments")
-    candidate = render(result, parsed, dialect, pretty=pretty, prefix=True)
+    candidate = render(result, parsed, dialect, pretty=pretty, prefix=True, format_config=True)
     reparsed = parse(candidate)
     if reparsed.tree != result and sql(reparsed.tree, dialect) != sql(result, dialect):
         raise SpecError("Candidate SQL did not round-trip")
@@ -91,15 +92,15 @@ def _once(code, dialect, *, schema, pretty, project=None, evidence=None, report=
             raise SpecError("Optimization changed the output interface")
     elif not unnamed:
         _optimizer_call(qualify_source, reparsed.tree, inputs, dialect)
-    if Counter(raw for _, _, raw, _ in macro_calls(code)) != Counter(raw for _, _, raw, _ in macro_calls(candidate)):
+    if not expand and Counter(raw for _, _, raw, _ in macro_calls(code)) != Counter(raw for _, _, raw, _ in macro_calls(candidate)):
         raise SpecError("Rewrite would change authored macro calls")
     return candidate
 
 
-def _fixed_point(code, dialect, *, schema=None, pretty=True, project=None, evidence=None, report=None):
+def _fixed_point(code, dialect, *, schema=None, pretty=True, project=None, evidence=None, report=None, expand=False):
     seen = {code}
     for _ in range(4):
-        candidate = _once(code, dialect, schema=schema, pretty=pretty, project=project, evidence=evidence, report=report)
+        candidate = _once(code, dialect, schema=schema, pretty=pretty, project=project, evidence=evidence, report=report, expand=expand)
         if candidate == code:
             return candidate
         if candidate in seen:
@@ -115,15 +116,14 @@ def optimize_source(code, dialect, *, schema=None, pretty=True):
     Explicit caller schemas must be complete, ordered relation schemas, not a
     list of documented columns. No warehouse access or metadata guesses occur.
     """
-    return _fixed_point(code, dialect, schema=schema, pretty=pretty)
+    return _fixed_point(code, validate_dialect(dialect), schema=schema, pretty=pretty)
 
 
-def optimize(project, *, select=None, exclude=None, format="pretty", preserve_macros=True):
+def optimize(project, *, select=None, exclude=None, format="pretty", expand=False):
+    """Rewrite authored SQL, optionally replacing supported local macros with SQL."""
     dialect = project.require_dialect()
     if format not in {"pretty", "compact"}:
         raise SpecError("optimization.format must be pretty or compact")
-    if not preserve_macros:
-        raise SpecError("Optimization always preserves Jinja; macro expansion is not a source rewrite")
     changes, skipped = ChangeSet(project.root), {}
     changes.optimization_report = {}
     evidence = SourceSchemas(project)
@@ -138,14 +138,16 @@ def optimize(project, *, select=None, exclude=None, format="pretty", preserve_ma
         changes.watch(resource.path, digest(project.contents[resource.path]), check=True)
         report = {}
         try:
-            candidate = _fixed_point(resource.code, dialect, pretty=format == "pretty", project=project, evidence=evidence, report=report)
+            candidate = _fixed_point(resource.code, dialect, pretty=format == "pretty", project=project, evidence=evidence, report=report, expand=expand)
+            before = parse_model(project, resource.code, expand=expand).tree
+            after = parse_model(project, candidate).tree
         except SpecError as exc:
             skipped[resource.id] = str(exc)
             continue
-        before = parse_model(project, resource.code).tree
-        after = parse_model(project, candidate).tree
         if candidate.encode("utf-8") == project.contents[resource.path]:
             status = "unchanged"
+        elif expand and macro_calls(resource.code):
+            status = "rewritten"
         elif before == after:
             status = "formatted"
         else:

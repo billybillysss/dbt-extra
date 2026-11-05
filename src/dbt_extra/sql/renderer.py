@@ -6,6 +6,7 @@ from sqlglot import exp
 from sqlglot.errors import ErrorLevel, SqlglotError
 
 from dbt_extra.errors import SpecError
+from dbt_extra.sql.config_format import format_configs
 
 
 def sql(node, dialect, *, pretty=False):
@@ -35,7 +36,7 @@ def reference_aliases(tree, refs):
             identifier.set("quoted", True)
 
 
-def render(tree, parsed, dialect, *, pretty=True, prefix=False):
+def render(tree, parsed, dialect, *, pretty=True, prefix=False, format_config=False):
     tree = tree.copy()
     reference_aliases(tree, parsed.refs)
     # Restore templates only in table positions, never aliases or literals.
@@ -71,5 +72,8 @@ def render(tree, parsed, dialect, *, pretty=True, prefix=False):
     rendered = sql(tree, dialect, pretty=pretty)
     for marker, raw in replacements.items():
         rendered = re.sub(rf'(?<![\w])(?:"{marker}"|`{marker}`|\[{marker}\]|{marker})(?![\w])', lambda _: raw, rendered)
-    header = parsed.prefix + "\n\n" if prefix and parsed.prefix else ""
+    header = parsed.prefix
+    if format_config and prefix and header:
+        header = format_configs(header, pretty=pretty)
+    header = header + "\n\n" if prefix and header else ""
     return header + rendered.rstrip(";") + ";\n"

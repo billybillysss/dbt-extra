@@ -10,7 +10,7 @@ from sqlglot import exp, parse_one
 from dbt_extra.errors import SpecError
 from dbt_extra.inspection import inspect, plan
 from dbt_extra.sql import render
-from tests.helpers import invoke, project, put, snapshot
+from tests.helpers import SQL_DIALECTS, invoke, project, put, snapshot
 
 
 def source_yaml(native, settings="schema: main_raw", table_settings="identifier: raw_orders"):
@@ -31,7 +31,7 @@ def manifest(native, *, source=None, models=None):
             "package_name": "shop", "source_name": "raw", **source}} if source is not None else {}}))
 
 
-@pytest.mark.parametrize("dialect", ["duckdb", "postgres", "snowflake", "bigquery", "spark", "tsql"])
+@pytest.mark.parametrize("dialect", SQL_DIALECTS)
 def test_literal_source_compiles_actual_schema_and_identifier(native, dialect):
     source_yaml(native)
     p = project(native)
@@ -83,7 +83,7 @@ def test_source_name_components_are_not_logical_names(native, settings, table_se
     assert (actual.catalog, actual.db, actual.name) == expected
 
 
-@pytest.mark.parametrize("dialect", ["duckdb", "postgres", "snowflake", "bigquery", "spark", "tsql"])
+@pytest.mark.parametrize("dialect", SQL_DIALECTS)
 def test_source_quoting_is_inherited_and_table_can_override(native, dialect):
     source_yaml(native, "database: Landing\nschema: 'Actual Schema'\nquoting: {database: true, schema: true, identifier: false}",
                 "identifier: 'Order Data'\nquoting: {identifier: true}")

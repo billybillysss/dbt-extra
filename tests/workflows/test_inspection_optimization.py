@@ -8,7 +8,7 @@ from sqlglot import exp
 
 from dbt_extra.inspection import inspect
 from dbt_extra.sql import parse_authored, render
-from tests.helpers import invoke, project, put, snapshot
+from tests.helpers import SQL_DIALECTS, invoke, project, put, snapshot
 
 
 @pytest.fixture
@@ -44,7 +44,7 @@ left join customer_orders as o on c.id = o.customer_id
     return native
 
 
-@pytest.mark.parametrize("dialect", ["duckdb", "postgres", "snowflake", "bigquery", "spark", "tsql"])
+@pytest.mark.parametrize("dialect", SQL_DIALECTS)
 def test_selected_customer_inspection_removes_unused_joins(customer_project, dialect):
     p = project(customer_project)
     p.dialect = dialect

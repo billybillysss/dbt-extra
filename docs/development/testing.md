@@ -25,8 +25,12 @@ the fixture tree, including any existing dbt logs and outputs.
   dbt README workflows and Python API examples.
 - `test_branding.py`: package/command identity, config/environment discovery,
   review envelopes, safe release automation and README references.
-- `test_logo.py`: accessible SVGs and exact preservation of the supplied Modular
-  joint icon's paths and palette across light/dark variants.
+- `test_logo.py`: valid, accessible, self-contained SVG assets.
+
+Keep tests focused on supported behavior and durable safety contracts. Migration
+completion checks, retired names/options, and one-off branding or fixture-count
+assertions do not belong in the ongoing suite. Compatibility checks remain when
+they exercise a currently supported format or preserve authored user data.
 
 Documentation checks are offline. They validate local targets and examples, not
 the availability or content of external websites. Do not update example output
@@ -51,7 +55,7 @@ These checks do not replace adapter-specific production acceptance tests.
 ```sh
 uv build
 uv venv .venv-package-smoke
-uv pip install --python .venv-package-smoke dist/dbt_extra-0.1.0-py3-none-any.whl
+uv pip install --python .venv-package-smoke dist/dbt_extra-0.2.0-py3-none-any.whl
 ```
 
 Run the following with **that environment's Python**, not `uv run` (which would

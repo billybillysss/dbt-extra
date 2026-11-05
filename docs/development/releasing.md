@@ -1,6 +1,6 @@
 # Release checklist
 
-dbt-extra `0.1.0` is the initial private preview.
+dbt-extra `0.2.0` is the version documented by this checkout.
 The [release workflow](https://github.com/billybillysss/dbt-extra/blob/HEAD/.github/workflows/release.yml)
 runs on `v*` tags or manual dispatch. It runs CI, builds distributions, checks
 package metadata and publishes to PyPI using OIDC trusted publishing.
@@ -19,6 +19,9 @@ package has been published.
 - Preserve MIT licensing and the bundled seed Apache 2.0 attribution.
 - Run the full test suite, executable README workflows and the native dbt
   fixture; inspect CI results for every declared platform/Python target.
+- Run the README from a fresh checkout and verify documented commands and settings
+  against clean artifact installations. Confirm SQL output and preview-only
+  behavior without warehouse credentials.
 - Review actual SQL/property diffs and known limitations. No warehouse speedup,
   universal adapter compatibility or crash-safe multi-file write claims.
 - Confirm approved SVG assets and image references, including the supplied
@@ -51,13 +54,18 @@ tests alone do not establish installability.
    in PyPI unless you also add a matching protected environment to the publish job.
    Only the publish job requests `id-token: write`; no PyPI API token is needed.
 4. Run CI and distribution checks, inspect the artifacts locally, then push the
-   approved `v<version>` tag (for example, `v0.1.0`). The workflow rejects tags
+   approved `v<version>` tag (for example, `v0.2.0`). The workflow rejects tags
    that do not match the installed `dbt-extra` version. Manual dispatch also
    publishes, but skips the tag check when run against a branch; choose the
    intended revision carefully. Do not rerun publication for an existing PyPI version.
 5. After approved publication, verify PyPI artifacts and install instructions,
    create accurate release notes, then update private-preview notices and add a
    package badge only when the matching release actually exists.
+6. Once public visibility is approved and enabled, check the repository, raw README
+   assets, Actions badge and issue forms while signed out. Verify issue/PR template
+   rendering and the private security-reporting route documented in
+   [Security](../../SECURITY.md); do not assume private vulnerability reporting is
+   enabled.
 
 Record future changes under Unreleased and verify release notes against the
 approved source revision and uploaded artifacts.

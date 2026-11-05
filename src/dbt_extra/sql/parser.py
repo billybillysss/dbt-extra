@@ -12,6 +12,7 @@ from sqlglot.errors import ErrorLevel, SqlglotError
 
 from dbt_extra.errors import SpecError
 from dbt_extra.files.yaml import text
+from dbt_extra.sql.functions import recognize_functions
 from dbt_extra.sql.jinja import JINJA, environment, validate_template
 from dbt_extra.sql.references import Reference
 
@@ -51,7 +52,7 @@ def read_query(value: str, context: str, dialect) -> exp.Query:
     for node in tree.find_all(exp.SetOperation):
         if len(node.this.selects) != len(node.expression.selects):
             raise SpecError(f"{context}: set-operation branches must have matching column counts")
-    return tree
+    return recognize_functions(tree, dialect)
 
 
 def parse_authored(code, dialect, context="SQL"):

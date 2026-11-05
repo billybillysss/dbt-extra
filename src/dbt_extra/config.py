@@ -4,18 +4,23 @@ import os
 from pathlib import Path
 
 from dbt_extra.errors import SpecError
+from dbt_extra.files.paths import safe_path
 from dbt_extra.files.yaml import fields, mapping
 
 
 def resolve_project(project_dir=None):
+    """Select one dbt root: explicit directory, environment, then nearest ancestor."""
     value = project_dir if project_dir is not None else os.environ.get("EXTRA_PROJECT_DIR")
     if value is not None:
-        return Path(value).absolute() / "extra_project.yaml"
-    for directory in (Path.cwd(), *Path.cwd().parents):
-        candidate = directory / "extra_project.yaml"
-        if candidate.is_file():
-            return candidate
-    return Path.cwd() / "extra_project.yaml"
+        root = Path(value).absolute()
+    else:
+        root = next((directory for directory in (Path.cwd(), *Path.cwd().parents)
+                     if (directory / "dbt_project.yml").is_file()), Path.cwd())
+    project_file = root / "dbt_project.yml"
+    safe_path(project_file)
+    if not project_file.is_file():
+        raise SpecError(f"No dbt_project.yml found in {root}; --project-dir or EXTRA_PROJECT_DIR must name a dbt project root")
+    return root.resolve()
 
 
 def strings(value, context):
@@ -26,15 +31,18 @@ def strings(value, context):
 
 def validate_settings(settings):
     allowed = {
-        "dbt": {"project_dir", "artifacts"}, "analysis": {"dialect"},
+        "dbt": {"artifacts"}, "analysis": {"dialect"},
         "inspection": {"expand", "optimize", "compile", "boundaries"},
         "export": {"output_dir", "default_view", "format", "select", "exclude", "views", "expand"},
-        "optimization": {"format", "select", "exclude", "preserve_macros", "enrich"},
+        "optimization": {"format", "select", "exclude", "expand", "enrich"},
         "metadata": {"select", "exclude"},
     }
     fields(settings, {"version", *allowed}, set(), "extra_project.yaml")
     if settings.get("version", 2) != 2:
         raise SpecError("extra_project.yaml must use version: 2 tool configuration; models are dbt files")
+    if "project_dir" in mapping(settings.get("dbt", {}), "dbt"):
+        raise SpecError("dbt.project_dir is no longer supported; move extra_project.yaml beside dbt_project.yml, "
+                        "remove dbt.project_dir, and select that root with --project-dir or EXTRA_PROJECT_DIR")
     for key, keys in allowed.items():
         fields(mapping(settings.get(key, {}), key), keys, set(), key)
     for section, options in settings.items():
@@ -43,9 +51,9 @@ def validate_settings(settings):
         for key, value in options.items():
             if key in {"select", "exclude", "boundaries"}:
                 strings(value, f"{section}.{key}")
-            if key in {"expand", "optimize", "compile", "preserve_macros", "enrich"} and type(value) is not bool:
+            if key in {"expand", "optimize", "compile", "enrich"} and type(value) is not bool:
                 raise SpecError(f"{section}.{key}: expected a boolean")
-            if key in {"output_dir", "default_view", "format", "dialect", "project_dir"} and (not isinstance(value, str) or not value):
+            if key in {"output_dir", "default_view", "format", "dialect"} and (not isinstance(value, str) or not value):
                 raise SpecError(f"{section}.{key}: expected nonempty text")
     views = mapping(settings.get("export", {}).get("views", {}), "export.views")
     for name, view in views.items():

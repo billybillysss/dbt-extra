@@ -7,6 +7,7 @@ from sqlglot import exp
 from sqlglot.optimizer.scope import Scope, traverse_scope
 
 from dbt_extra.errors import SpecError
+from dbt_extra.sql.functions import function_barrier
 from dbt_extra.sql.parser import parse_authored
 from dbt_extra.sql.macros import single_expression, contains_opaque
 from dbt_extra.sql.renderer import render
@@ -25,7 +26,7 @@ def relation_tables(tree):
 
 
 def volatile(tree):
-    return any(isinstance(n, exp.Anonymous) or n.key in {"rand", "randn", "uuid", "currenttimestamp", "currentdate", "currenttime", "nextvaluefor"}
+    return any((isinstance(n, exp.Anonymous) and function_barrier(n)) or n.key in {"rand", "randn", "uuid", "currenttimestamp", "currentdate", "currenttime", "nextvaluefor"}
                for n in tree.walk())
 
 

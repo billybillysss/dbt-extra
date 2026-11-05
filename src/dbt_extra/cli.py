@@ -8,8 +8,10 @@ import click
 from sqlglot.errors import SqlglotError
 
 from dbt_extra import __version__
+from dbt_extra.config import resolve_project
 from dbt_extra.enrichment import enrich
 from dbt_extra.files.changes import ChangeSet
+from dbt_extra.files.paths import safe_path
 from dbt_extra.project import Project
 from dbt_extra.review import export_review, import_review
 from dbt_extra.inspection import inspect, plan
@@ -63,7 +65,7 @@ def selectors(function):
 
 
 def preview_option(function):
-    return click.option("--preview", "--dry-run", is_flag=True, help="Show proposed changes without writing files.")(function)
+    return click.option("--preview", is_flag=True, help="Show proposed changes without writing files.")(function)
 
 
 def summary(changes, preview):
@@ -80,9 +82,10 @@ def finish(changes, preview):
 
 @click.group()
 @click.version_option(version=__version__, prog_name="extra")
-@click.option("--project-dir", type=click.Path(path_type=Path), envvar="EXTRA_PROJECT_DIR")
+@click.option("--project-dir", type=click.Path(path_type=Path), envvar="EXTRA_PROJECT_DIR",
+              help="dbt project root; overrides EXTRA_PROJECT_DIR, otherwise discover upward from the current directory.")
 @click.option("--dialect", help="SQL dialect; overrides configuration and manifest adapter.")
-@click.option("--manifest", type=click.Path(exists=True, dir_okay=False, path_type=Path), help="Optional dbt manifest evidence.")
+@click.option("--manifest", type=click.Path(exists=True, dir_okay=False, path_type=Path), help="Optional dbt manifest evidence; relative to the current directory.")
 @click.pass_context
 def cli(ctx, project_dir, dialect, manifest):
     """Review, inspect, and edit native dbt transformations offline."""
@@ -90,22 +93,19 @@ def cli(ctx, project_dir, dialect, manifest):
 
 
 @cli.command("init")
-@click.argument("directory", required=False, default=".", type=click.Path(path_type=Path))
 @preview_option
 @click.pass_context
 @guarded
-def init_command(ctx, directory, preview):
+def init_command(ctx, preview):
     """Add optional dbt-extra settings to an existing native dbt project."""
-    base = ctx.obj["directory"] or Path.cwd()
-    root = (base / directory).resolve()
-    if not (root / "dbt_project.yml").is_file():
-        raise SpecError("init requires an existing dbt_project.yml; dbt-extra does not scaffold a second transformation source")
+    root = resolve_project(ctx.obj["directory"])
     path = root / "extra_project.yaml"
+    safe_path(path)
     if path.exists():
         raise SpecError(f"Refusing to overwrite {path}")
     changes = ChangeSet(root)
     changes.set(path, dump_yaml({"version": 2, "analysis": {"dialect": ctx.obj["dialect"] or "auto"},
-        "export": {"output_dir": "extra/review", "format": "xlsx"}, "optimization": {"format": "pretty", "preserve_macros": True}}))
+        "export": {"output_dir": "extra/review", "format": "xlsx"}, "optimization": {"format": "pretty", "expand": False}}))
     finish(changes, preview)
 
 
@@ -149,7 +149,7 @@ def inspect_command(ctx, table, columns, from_tables, optimized, expand, compile
 
 @cli.command("export")
 @click.option("--format", type=click.Choice(["xlsx", "csv", "json"]))
-@click.option("--output-dir", "--path", type=click.Path(path_type=Path))
+@click.option("--output-dir", "--path", type=click.Path(path_type=Path), help="Review destination; relative to the dbt project root unless absolute.")
 @click.option("--view", help="Named view from export.views.")
 @click.option("--expand/--no-expand", default=None, help="Show read-only SQL/columns from statically resolvable local macros.")
 @selectors
@@ -185,19 +185,19 @@ def import_command(ctx, path, preview, dialect):
 @cli.command("optimize")
 @selectors
 @click.option("--format", type=click.Choice(["pretty", "compact"]))
-@click.option("--preserve-macro", "preserve_macros", type=click.BOOL, default=None)
+@click.option("--expand", type=click.BOOL, default=None, help="Write statically resolvable local macros as SQL (default: false).")
 @click.option("--enrich", "enrich_enabled", type=click.BOOL, default=None)
 @preview_option
 @click.option("--dialect")
 @click.pass_context
 @guarded
-def optimize_command(ctx, select, exclude, format, preserve_macros, enrich_enabled, preview, dialect):
+def optimize_command(ctx, select, exclude, format, expand, enrich_enabled, preview, dialect):
     """Conservatively rewrite authored dbt SQL, never compiled SQL."""
     project = loaded(ctx, dialect)
     options = project.options("optimization", {"select": names(select), "exclude": names(exclude), "format": format,
-        "preserve_macros": preserve_macros, "enrich": enrich_enabled})
+        "expand": expand, "enrich": enrich_enabled})
     changes, skipped = optimize(project, select=options.get("select"), exclude=options.get("exclude"),
-        format=options.get("format", "pretty"), preserve_macros=options.get("preserve_macros", True))
+        format=options.get("format", "pretty"), expand=options.get("expand", False))
     for uid, reason in skipped.items():
         click.echo(f"Skipped {uid}: {reason}. Model unchanged.", err=True)
     optimization_report = changes.optimization_report

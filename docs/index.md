@@ -21,6 +21,7 @@ dbt SQL and properties remain the only public source of truth.
 
 - [CLI](reference/cli.md)
 - [Project configuration](reference/configuration.md)
+- [SQL functions: implementations and types](reference/sql-functions/README.md)
 - [Review tables and JSON](reference/catalogs.md)
 - [Compatibility and versioning](compatibility.md)
 - [Troubleshooting](troubleshooting.md)
@@ -31,7 +32,6 @@ dbt SQL and properties remain the only public source of truth.
 - [Architecture](development/architecture.md)
 - [Testing](development/testing.md)
 - [Releasing](development/releasing.md)
-- [Public launch checklist](development/launch.md)
 - [Logo and icons](logo.md)
 - [Security](../SECURITY.md)
 - [Changelog](../CHANGELOG.md)

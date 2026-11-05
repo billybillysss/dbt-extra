@@ -11,7 +11,7 @@ from dbt_extra.inspection import inspect, plan
 from dbt_extra.sql import parse_authored, render
 from dbt_extra.sql.inspection_rules import (deduplicate_subqueries, normalize_predicates,
                                        optimize_safe_joins, pushdown_safe_predicates)
-from tests.helpers import project, put, snapshot
+from tests.helpers import SQL_DIALECTS, project, put, snapshot
 
 
 CASES = {
@@ -106,7 +106,7 @@ def test_extra_inspection_rules_preserve_results(native, case, empty, columns):
 
 
 @pytest.mark.parametrize("case", ["normalize", "pushdown", "join", "deduplicate"])
-@pytest.mark.parametrize("dialect", ["duckdb", "postgres", "snowflake", "bigquery", "spark", "tsql"])
+@pytest.mark.parametrize("dialect", SQL_DIALECTS)
 @pytest.mark.parametrize("compiled", [False, True])
 def test_extra_rules_simplify_and_roundtrip(native, case, dialect, compiled):
     p = target(native, case)

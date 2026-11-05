@@ -26,7 +26,7 @@ from dbt_extra.errors import SpecError
 from dbt_extra.files.yaml import load_yaml
 
 
-from tests.helpers import edit_csv, invoke, project, put, snapshot
+from tests.helpers import SQL_DIALECTS, edit_csv, invoke, project, put, snapshot
 
 
 def test_optional_config_and_single_root_paths(native, monkeypatch):
@@ -199,7 +199,7 @@ def test_optimize_source_without_artifacts_preserves_templates(native):
     assert not skipped
     changes.apply()
     code = (native / "models/gld/revenue.sql").read_text()
-    assert "{{ config(materialized='table') }}" in code
+    assert "{{ config(\n    materialized='table'\n) }}" in code
     assert "{{ ref('orders') }}" in code
     assert not (native / "target").exists()
     assert not optimize(project(native), select=["revenue"])[0].changed()
@@ -226,7 +226,8 @@ def test_reference_variants_and_config_preserved():
     optimized = optimize_source(code, "duckdb", schema=schema)
     assert "{{ ref('pkg', 'orders', version=2) }}" in optimized
     assert "{{ source('raw', 'users') }}" in optimized
-    assert code.split("\n")[0] in optimized
+    assert parse_authored(optimized, "duckdb").config == parse_authored(code, "duckdb").config
+    assert "meta={\n        'owner': 'finance'\n    }" in optimized
 
 
 def test_inspect_selected_preserves_rows_and_boundaries(native):
@@ -355,18 +356,18 @@ def test_only_dbt_public_commands():
     assert set(cli.commands) == {"init", "validate", "inspect", "export", "import", "optimize", "enrich"}
 
 
-@pytest.mark.parametrize("dialect", ["duckdb", "postgres", "snowflake", "bigquery", "spark", "tsql"])
+@pytest.mark.parametrize("dialect", SQL_DIALECTS)
 def test_source_rewrite_roundtrips_across_dialects(dialect):
     code = "-- Authored header\n{{ config(materialized='view') }}\nselect o.id, o.amount + 0 as amount from {{ ref('orders') }} o where o.id > 0\n"
     candidate = optimize_source(code, dialect)
-    assert candidate.startswith("-- Authored header\n{{ config(materialized='view') }}")
+    assert candidate.startswith("-- Authored header\n{{ config(\n    materialized='view'\n) }}")
     assert candidate.count("-- Authored header") == 1
     assert candidate.count("{{ ref('orders') }}") == 1
     assert "extra_ref_" not in candidate
     assert optimize_source(candidate, dialect) == candidate
 
 
-@pytest.mark.parametrize("dialect", ["duckdb", "postgres", "snowflake", "bigquery", "spark", "tsql"])
+@pytest.mark.parametrize("dialect", SQL_DIALECTS)
 def test_selected_inspection_roundtrips_across_dialects(native, dialect):
     p = Project(native, dialect=dialect)
     tree, refs, _ = inspect(p, "revenue", ["revenue"], compiled=False)
@@ -436,20 +437,11 @@ def test_project_config_changes_invalidate_edits(native):
     assert snapshot(native) == before
 
 
-def test_config_directory_can_point_at_nested_dbt_project(tmp_path):
-    put(tmp_path, "extra_project.yaml", "version: 2\ndbt:\n  project_dir: project\nanalysis:\n  dialect: duckdb\n")
+def test_colocated_tool_settings_are_checked_for_conflicts(tmp_path):
+    config = put(tmp_path, "project/extra_project.yaml", "version: 2\nanalysis:\n  dialect: duckdb\n")
     put(tmp_path, "project/dbt_project.yml", "name: nested\n")
     put(tmp_path, "project/models/one.sql", "select 1 as id")
-    p = Project(tmp_path)
-    assert p.root == tmp_path / "project"
-    assert p.find("one").model_path == "models"
-
-
-def test_external_tool_settings_are_checked_for_conflicts(tmp_path):
-    config = put(tmp_path, "extra_project.yaml", "version: 2\ndbt:\n  project_dir: project\nanalysis:\n  dialect: duckdb\n")
-    put(tmp_path, "project/dbt_project.yml", "name: nested\n")
-    put(tmp_path, "project/models/one.sql", "select 1 as id")
-    p = Project(tmp_path)
+    p = Project(tmp_path / "project")
     export_review(p, format="csv")
     edit_csv(p.root / "extra/review", "columns", lambda r: r["column"] == "id", description="Identifier")
     changes, _ = optimize(p)
@@ -457,7 +449,7 @@ def test_external_tool_settings_are_checked_for_conflicts(tmp_path):
     with pytest.raises(SpecError, match="changed while preparing"):
         changes.apply()
     with pytest.raises(SpecError, match="changed since export"):
-        import_review(Project(tmp_path), p.root / "extra/review")
+        import_review(Project(tmp_path / "project"), p.root / "extra/review")
 
 
 def test_export_rejects_changes_after_project_load(native):
@@ -521,7 +513,7 @@ def test_render_markers_cannot_replace_authored_string_literals(native):
 def test_dynamic_config_is_preserved_but_prevents_upstream_expansion(native):
     code = "{{ config(materialized=var('storage')) }}\nselect id, amount from {{ source('raw', 'orders') }}"
     put(native, "models/slv/orders.sql", code)
-    assert "{{ config(materialized=var('storage')) }}" in optimize_source(code, "duckdb")
+    assert "{{ config(\n    materialized=var('storage')\n) }}" in optimize_source(code, "duckdb")
     tree, parsed, issues = inspect(project(native), "revenue", ["revenue"])
     assert "{{ ref('orders') }}" in render(tree, parsed, "duckdb")
     assert any("dynamic configuration" in issue["reason"] for issue in issues)

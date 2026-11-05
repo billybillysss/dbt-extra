@@ -16,5 +16,7 @@ between current files and manifest is diagnostic, not permission to overwrite fi
 Begin read-only on a small selection, inspect coverage reasons, and try a
 metadata-only import preview. Unsupported templates remain reviewable source,
 without pretending their internals are understood. Run dbt checks independently.
-Optional settings retain [existing resolution rules](../reference/configuration.md).
+Optional settings live beside `dbt_project.yml`. To avoid repeating the directory,
+run inside that project or set `EXTRA_PROJECT_DIR`; an explicit `--project-dir`
+overrides both. See [project resolution and migration](../reference/configuration.md#resolution-and-precedence).
 No credentials or profile copying is needed.

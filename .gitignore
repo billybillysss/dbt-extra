@@ -22,3 +22,6 @@ wheels/
 
 # Temporary Excel lock files
 ~$*.xlsx
+
+# Local notes and checklists
+/local/
