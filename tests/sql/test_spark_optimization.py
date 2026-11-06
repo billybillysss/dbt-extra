@@ -8,8 +8,10 @@ from sqlglot import exp, parse_one
 
 from dbt_extra.inspection import inspect
 from dbt_extra.sql.rewrites.engine import optimize_source
+from dbt_extra.sql.rewrites.projections import prune_projections
+from dbt_extra.sql.rewrites.session import validate_contract
 from tests.helpers import project, put
-from tests.optimizer_cases import RULE_QUERIES, RULE_SCHEMA, assert_rule_exercised
+from tests.optimizer_cases import COMMENT_PROJECTION_QUERIES, RULE_QUERIES, RULE_SCHEMA, assert_rule_exercised
 
 
 @pytest.fixture(scope="module")
@@ -130,6 +132,35 @@ def test_spark_executes_certified_null_check_pruning(native, spark, function, mo
     assert not parse_one(candidate, read="spark").find(exp.Anonymous)
     assert "unused" not in candidate.lower()
     assert_spark_equivalent(spark, code, candidate, ordered=True)
+
+
+@pytest.mark.parametrize("case", COMMENT_PROJECTION_QUERIES)
+@pytest.mark.parametrize("empty", [False, True])
+@pytest.mark.parametrize("ansi", [False, True])
+@pytest.mark.parametrize("mode", ["projection", "inspection"])
+def test_spark_commented_projection_semantics(native, spark, case, empty, ansi, mode):
+    spark.conf.set("spark.sql.ansi.enabled", str(ansi).lower())
+    spark.sql("CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES "
+              "(1,2,CAST(NULL AS INT)),(1,2,NULL),(1,3,4),(2,NULL,5),(NULL,6,6) AS v(id,x,unused) "
+              + ("WHERE FALSE" if empty else ""))
+    code, removed = COMMENT_PROJECTION_QUERIES[case]
+    original = parse_one(code, read="spark")
+    if mode == "projection":
+        tree = prune_projections(original.copy(), dialect="spark", relocate_comments=True)
+        validate_contract(original, tree, "spark")
+        before_count = sum(len(q.selects) for q in original.find_all(exp.Select))
+        after_count = sum(len(q.selects) for q in tree.find_all(exp.Select))
+        assert (after_count < before_count) == removed
+    else:
+        put(native, "models/commented.sql", code)
+        p = project(native)
+        p.dialect = "spark"
+        tree, _, outcomes = inspect(p, "commented", compiled=False)
+        if case in {"subquery", "single_cte", "shared_cte", "left_fanout"}:
+            assert any(o["rule"] == "projection_pruning" and o["status"] == "applied" for o in outcomes)
+    assert Counter(c for n in tree.walk() for c in n.comments or []) == Counter(
+        c for n in original.walk() for c in n.comments or [])
+    assert_spark_equivalent(spark, code, tree.sql(dialect="spark"), ordered=bool(original.args.get("order")))
 
 
 @pytest.mark.parametrize("ansi", [False, True])
