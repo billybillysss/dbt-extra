@@ -2,7 +2,7 @@
 
 from dbt_extra.errors import SpecError
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 
 __all__ = ["Project", "ChangeSet", "SpecError", "__version__"]
 
