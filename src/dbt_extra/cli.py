@@ -11,6 +11,7 @@ from dbt_extra import __version__
 from dbt_extra.config import resolve_project
 from dbt_extra.enrichment import enrich
 from dbt_extra.files.changes import ChangeSet
+from dbt_extra.files.output import copy_text, save_text
 from dbt_extra.files.paths import safe_path
 from dbt_extra.project import Project
 from dbt_extra.review import export_review, import_review
@@ -81,6 +82,40 @@ def finish(changes, preview):
     summary(changes.apply(preview=preview), preview)
 
 
+def inspection_diagnostics(issues, verbose=False):
+    """Summarize presentation only; retain the full analysis outcomes unchanged."""
+    seen, applied = set(), {}
+    summarized = False
+    for issue in issues:
+        if issue.get("status") == "not_applicable":
+            continue
+        resource = issue["resource_id"]
+        if verbose:
+            text = outcome_text(issue) if "rule" in issue else issue["reason"]
+            yield f"-- Boundary/coverage: {resource}: {text}".replace("\n", " ")
+            continue
+        rule, status = issue.get("rule"), issue.get("status")
+        if status == "applied":
+            applied.setdefault(resource, {})[rule] = None
+            continue
+        boundary = rule in {None, "expansion", "relation_resolution", "wildcard_expansion", "static_jinja"}
+        key = (resource, status, issue.get("reason_code"), issue["reason"], boundary)
+        if key in seen:
+            continue
+        seen.add(key)
+        if rule == "expansion" and issue["reason"] == "source input":
+            yield f"-- Source boundary: {resource}."
+        else:
+            label = "Boundary/coverage" if boundary else "Rewrite rolled back" if status == "rolled_back" else "Rewrites skipped"
+            yield f"-- {label}: {resource}: {issue['reason']}".replace("\n", " ")
+        summarized = summarized or not boundary
+    for resource, rules in applied.items():
+        yield f"-- Applied: {resource}: {', '.join(rules)}."
+        summarized = True
+    if summarized:
+        yield "-- Use --verbose for per-rule/per-scope diagnostics."
+
+
 @click.group()
 @click.version_option(version=__version__, prog_name="extra")
 @click.option("--project-dir", type=click.Path(path_type=Path), envvar=["EXTRA_PROJECT_DIR", "DBT_PROJECT_DIR"],
@@ -131,24 +166,42 @@ def validate(ctx, dialect):
 @click.option("--expand", type=click.BOOL, default=None, help="Expand upstream models and statically resolvable local macros.")
 @click.option("--compile", "compiled", type=click.BOOL, default=None, help="Resolve physical relation names offline (default: true); does not run dbt compile.")
 @click.option("--view", type=click.Choice(["sql", "plan"]), default="sql")
+@click.option("--verbose", is_flag=True, help="Show full per-rule/per-scope boundary and rewrite diagnostics.")
+@click.option("--copy", "copy_sql", is_flag=True, help="Copy SQL only (without CLI diagnostics) to the clipboard.")
+@click.option("--output", type=click.Path(dir_okay=False, path_type=Path), help="Save SQL only; relative to the dbt project root unless absolute.")
+@click.option("--force", is_flag=True, help="Allow --output to replace an existing export, never project input files.")
 @click.option("--dialect")
 @click.pass_context
 @guarded
-def inspect_command(ctx, table, columns, from_tables, optimized, expand, compiled, view, dialect):
-    """Explain full model or selected-column logic without changing files."""
+def inspect_command(ctx, table, columns, from_tables, optimized, expand, compiled, view, verbose, copy_sql, output, force, dialect):
+    """Explain full model or selected-column logic without changing authored files."""
+    if view != "sql" and (copy_sql or output is not None):
+        raise click.UsageError("--copy and --output require --view sql")
+    if force and output is None:
+        raise click.UsageError("--force requires --output")
     project = loaded(ctx, dialect)
     settings = project.options("inspection", {"optimize": optimized, "expand": expand, "compile": compiled, "boundaries": names(from_tables)})
     tree, parsed, issues = inspect(project, table, names(columns), boundaries=settings.get("boundaries", []),
         expanded=settings.get("expand", True), optimized=settings.get("optimize", True), compiled=settings.get("compile", True))
-    click.echo("-- Definition explanation, not stored-relation equivalence or a warehouse execution plan.")
-    click.echo("-- Offline relation resolution; unresolved dbt templates retained. Not executed. Authored files unchanged."
-               if settings.get("compile", True) else "-- Authored dbt ref/source boundaries retained; not executed. Authored files unchanged.")
-    for issue in issues:
-        if issue.get("status") == "not_applicable":
-            continue
-        text = outcome_text(issue) if "rule" in issue else issue["reason"]
-        click.echo(f"-- Boundary/coverage: {issue['resource_id']}: {text}".replace("\n", " "))
-    click.echo(plan(tree, parsed, project.dialect) if view == "plan" else render(tree, parsed, project.dialect), nl=view == "plan")
+    click.echo("-- Offline definition explanation, not stored-relation equivalence or a warehouse execution plan. "
+               "Not executed. Authored files unchanged.")
+    if verbose:
+        click.echo("-- Offline relation resolution; unresolved dbt templates retained."
+                   if settings.get("compile", True) else "-- Authored dbt ref/source boundaries retained.")
+    for line in inspection_diagnostics(issues, verbose):
+        click.echo(line)
+    text = plan(tree, parsed, project.dialect) if view == "plan" else render(tree, parsed, project.dialect)
+    click.echo(text, nl=view == "plan")
+    if output is not None:
+        destination = (project.root / output).absolute()
+        safe_path(destination)
+        if destination.resolve() in project.contents:
+            raise SpecError(f"Refusing to overwrite project input: {destination}")
+        save_text(destination, text, force=force)
+        click.echo(f"Saved SQL: {destination}", err=True)
+    if copy_sql:
+        copy_text(text)
+        click.echo("Copied SQL to clipboard.", err=True)
 
 
 @cli.command("export")

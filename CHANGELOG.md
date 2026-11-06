@@ -8,8 +8,22 @@ changes receive a version and an ISO 8601 release date when released.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-06
+
+### Added
+
+- Add `inspect --copy` and `inspect --output PATH` to copy or save rendered SQL
+  without CLI notices or diagnostics, while preserving SQL comments and terminal
+  warnings. Relative output paths use the dbt project root; existing exports
+  require `--force`, and project inputs remain protected. Both options require
+  `--view sql` and can be combined; clipboard failures leave saved SQL intact.
+
 ### Changed
 
+- Summarize repeated `inspect` rewrite diagnostics by default, with applied rules
+  listed once per model. Add `inspect --verbose` for full per-rule/per-scope
+  details and occurrence counts; SQL, safety checks and internal outcomes are
+  unchanged, and boundary warnings and rollback reasons remain visible.
 - Add a reproducible five-step demo, with static SQL
   optimization boundaries and no warehouse performance claims.
 - Document PyPI installation with `uv add dbt-extra` and the standalone uv tool
@@ -187,7 +201,8 @@ Initial release of **dbt-extra**.
 - PyPI trusted publishing after CI on `v*` tags or manual dispatch, with
   release-tag/package-version verification for tag runs.
 
-[Unreleased]: https://github.com/billybillysss/dbt-extra/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/billybillysss/dbt-extra/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/billybillysss/dbt-extra/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/billybillysss/dbt-extra/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/billybillysss/dbt-extra/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/billybillysss/dbt-extra/releases/tag/v0.1.0

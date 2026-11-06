@@ -4,7 +4,7 @@
 
 | Surface | Current contract |
 | --- | --- |
-| Package | `dbt-extra`, version `0.2.1`; published on PyPI, pre-1.0. Executable `extra`, Python namespace `dbt_extra`. Pin and test upgrades. |
+| Package | `dbt-extra`, version `0.2.2`; distributed through PyPI, pre-1.0. Executable `extra`, Python namespace `dbt_extra`. Pin and test upgrades. |
 | Python | Metadata requires 3.11+. CI targets 3.11 and 3.13 on Linux, plus 3.13 on Windows. Other Python/platform combinations are not thereby certified. |
 | SQLGlot | Runtime dependency is `>=30.29.0`; the local function-gap catalog is checked against 30.29.0. Dialect availability does not establish warehouse execution support. |
 | Tool settings | Optional `extra_project.yaml`, `version: 2`; no transformation authoring schema. |
@@ -63,7 +63,7 @@ alone does not certify enrichment or warehouse execution.
 
 ## Distribution status
 
-Version `0.2.1` is available on [PyPI](https://pypi.org/project/dbt-extra/).
+Published distributions are available on [PyPI](https://pypi.org/project/dbt-extra/).
 Install with `uv tool install dbt-extra` for the CLI or `uv add dbt-extra` for a
 project dependency. Record the installed version when reporting results; for a
 source checkout, also record the Git commit.

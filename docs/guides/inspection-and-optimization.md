@@ -26,6 +26,27 @@ Use `--optimize false` to retain the unsimplified explanation. This is more than
 a list of value-lineage origins. `--from` retains selected upstream models as logical
 relation inputs; other branches may still expand those shared ancestors.
 
+Output summarizes repeated rewrite reasons by default. Add `--verbose` to see
+per-rule/per-scope diagnostics and occurrence counts. This affects presentation
+only: source boundaries, unresolved-relation warnings and rollback reasons remain
+visible in the default output, and the SQL and safety checks are unchanged.
+
+To copy or save SQL without CLI notices or diagnostics:
+
+```bash
+extra inspect customer_revenue --copy
+extra inspect customer_revenue --output extra/sql/customer_revenue.sql
+extra inspect customer_revenue --copy --output extra/sql/customer_revenue.sql
+```
+
+These options require `--view sql` and still show the explanation and warnings in
+the terminal. SQL comments are preserved, but CLI logs are not copied or saved.
+Relative output paths start at the dbt project root; missing directories are created.
+Existing files require `--force`, and authored project inputs cannot be overwritten.
+Clipboard errors leave the SQL visible (and the file saved when both options are
+used). On Linux, install `wl-copy`, `xclip` or `xsel` in a desktop session; use
+`--output` in headless environments.
+
 `--compile true` resolves physical **relation names**, not arbitrary dbt Jinja or
 compiled model SQL. Literal sources use their declared database/schema/identifier
 (schema defaults to the source name; identifier defaults to the table name).

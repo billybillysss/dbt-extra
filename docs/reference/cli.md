@@ -98,6 +98,7 @@ validation or enforced-contract checks.
 ```bash
 extra inspect customer_revenue --columns revenue --from orders --compile false
 extra inspect customer_revenue --columns revenue --view plan --compile false
+extra inspect customer_revenue --copy --output extra/sql/customer_revenue.sql
 ```
 
 `MODEL` is a model name or exact resource ID.
@@ -110,12 +111,28 @@ extra inspect customer_revenue --columns revenue --view plan --compile false
 | `--optimize true\|false` | `true` | Simplify the logical explanation |
 | `--compile true\|false` | `true` | Resolve available physical relation names offline |
 | `--view sql\|plan` | `sql` | Render SQL or a logical tree |
+| `--verbose` | Off | Show full per-rule/per-scope boundary and rewrite diagnostics |
+| `--copy` | Off | Copy SQL only to the system clipboard; requires `--view sql` |
+| `--output PATH` | None | Save UTF-8 SQL, relative to the dbt project root unless absolute; requires `--view sql` |
+| `--force` | Off | Replace an existing output file; requires `--output`; project inputs remain protected |
 
-Inspection is read-only. Selected columns retain row-affecting joins, filters,
+Inspection never changes authored project inputs; `--output` explicitly writes a
+separate SQL export, creating parent directories as needed. Selected columns retain row-affecting joins, filters,
 grouping and multiplicity. `--compile false` retains dbt relation templates;
 true uses literal source declarations or applicable manifest evidence. Unresolved
 names remain templates with warnings. It never evaluates profiles or verifies
 warehouse existence. The plan is not a warehouse execution plan.
+By default, repeated rewrite reasons are summarized and applied rules are listed
+once per model. `--verbose` restores detailed rule, scope and occurrence information;
+it does not change the SQL or safety checks.
+
+Copying and saving exclude CLI notices and diagnostics, even with `--verbose`;
+comments already in the rendered SQL are preserved. Terminal output and safety
+warnings remain visible. Both options can be combined; the file is saved before
+copying, so a clipboard failure does not lose the export. Clipboard failures return
+a nonzero exit status. Clipboard support uses PowerShell on Windows, `pbcopy` on
+macOS, and `wl-copy` (Wayland), `xclip` or `xsel` (X11) on Linux. Headless sessions
+should use `--output` instead.
 
 See the [inspection guide](../guides/inspection-and-optimization.md) for SQL
 comparisons and the [partial optimization guide](../guides/partial-optimization.md)

@@ -137,7 +137,7 @@ remote execution coverage. A configured CI lane is not a claim that it has passe
 ```sh
 uv build
 uv venv .venv-package-smoke
-uv pip install --python .venv-package-smoke dist/dbt_extra-0.2.1-py3-none-any.whl
+uv pip install --python .venv-package-smoke dist/dbt_extra-0.2.2-py3-none-any.whl
 ```
 
 Run the following with **that environment's Python**, not `uv run` (which would
