@@ -8,6 +8,19 @@ changes receive a version and an ISO 8601 release date when released.
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-11-06
+
+### Fixed
+
+- Allow SQLGlot comment reattachment during round-trip validation while retaining
+  output-name/order and exact candidate AST comment-count checks
+  ([#1](https://github.com/billybillysss/dbt-extra/issues/1)). This does not
+  guarantee lossless serializer comment handling or execution equivalence.
+- Allow inspection to prune otherwise-safe, unused projections with ordinary
+  prose comments, preserving those comments on the enclosing SELECT. Source
+  rewriting defaults, directive/hint protection and expression-safety checks
+  remain unchanged.
+
 ## [0.2.2] - 2026-11-06
 
 ### Added
@@ -201,7 +214,8 @@ Initial release of **dbt-extra**.
 - PyPI trusted publishing after CI on `v*` tags or manual dispatch, with
   release-tag/package-version verification for tag runs.
 
-[Unreleased]: https://github.com/billybillysss/dbt-extra/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/billybillysss/dbt-extra/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/billybillysss/dbt-extra/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/billybillysss/dbt-extra/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/billybillysss/dbt-extra/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/billybillysss/dbt-extra/compare/v0.1.0...v0.2.0

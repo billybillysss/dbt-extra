@@ -86,6 +86,13 @@ It exercises rule interactions in source and inspection paths; positive controls
 assert that rules actually apply, not just that unchanged SQL still executes.
 This is reproducible generated coverage, not exhaustive fuzzing or a proof.
 
+`tests/sql/test_rewrite_session.py` separates candidate AST comment preservation
+from serializer attachment/fidelity, including aliases and expanded CTEs.
+`tests/sql/test_projection_pruning.py` covers inspection-only prose relocation,
+directive/effect barriers and duplicate/NULL-aware results. The shared commented
+projection cases also run in the opt-in Spark lane, in both ANSI modes; skipped
+Spark tests are not execution evidence.
+
 `tests/sql/test_jinja_execution.py` compares against real Jinja rather than using
 the production interpreter on both sides. The opt-in real dbt test below builds
 eight temporary models before and after applying optimizer changes, in both macro
@@ -137,7 +144,7 @@ remote execution coverage. A configured CI lane is not a claim that it has passe
 ```sh
 uv build
 uv venv .venv-package-smoke
-uv pip install --python .venv-package-smoke dist/dbt_extra-0.2.2-py3-none-any.whl
+uv pip install --python .venv-package-smoke dist/dbt_extra-0.2.3-py3-none-any.whl
 ```
 
 Run the following with **that environment's Python**, not `uv run` (which would

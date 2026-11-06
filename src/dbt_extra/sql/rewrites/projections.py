@@ -5,6 +5,8 @@ moved. Synthetic ORDER references exist solely in the analysis copy: they make
 observable evaluations and authored alias bindings roots of the dependency graph.
 """
 
+import re
+
 from sqlglot import exp
 from sqlglot.optimizer.pushdown_projections import projection_reachability
 
@@ -40,7 +42,29 @@ def prune_source_projections(authored, expanded, qualified, *, dialect=None):
     return result
 
 
-def prune_projections(tree, *, authored=None, dialect=None):
+def _discardable_projection(projection, dialect, relocate_comments):
+    if discardable(projection, dialect):
+        return True
+    if not relocate_comments:
+        return False
+    comments = [comment for node in projection.walk() for comment in node.comments or []]
+    # This is a bounded prose policy, not a general directive parser. Unknown
+    # syntax remains a safety root, as do hint nodes and unsafe evaluations.
+    if not comments or any(
+        not re.fullmatch(r"[A-Za-z][A-Za-z0-9 \t\r\n(),.'/-]*", comment.strip())
+        or any(marker in comment.casefold() for marker in ("sqlglot", "noqa", "nosec", "nosemgrep"))
+        for comment in comments
+    ):
+        return False
+    clean = projection.copy()
+    for node in clean.walk():
+        node.pop_comments()
+    return discardable(clean, dialect)
+
+
+def prune_projections(tree, *, authored=None, dialect=None, relocate_comments=False):
+    """Optionally relocate dead projection prose for inspection, never authored SQL."""
+    relocate_comments = relocate_comments and authored is None
     analysis = tree.copy()
     queries = list(analysis.find_all(exp.Select))
     sources = list((authored or tree).find_all(exp.Select))
@@ -61,7 +85,9 @@ def prune_projections(tree, *, authored=None, dialect=None):
             if not isinstance(projection.unalias(), exp.Column):
                 aliases.update(c.name.casefold() for c in projection.find_all(exp.Column) if not c.table)
         keep = [p.output_name for p, original in zip(query.selects, source.selects)
-                 if not discardable(p, dialect) or not discardable(original, dialect) or original.output_name.casefold() in aliases]
+                  if not _discardable_projection(p, dialect, relocate_comments)
+                  or not _discardable_projection(original, dialect, relocate_comments)
+                  or original.output_name.casefold() in aliases]
         keep += [c.name for key in ("qualify", "having") if query.args.get(key)
                  for c in query.args[key].find_all(exp.Column) if not c.table and c.name in names]
         clauses = [source.args.get(k) for k in ("group", "order")]
@@ -97,5 +123,11 @@ def prune_projections(tree, *, authored=None, dialect=None):
         prefix = max(ordinals, default=0)
         kept = [p for i, (p, live) in enumerate(zip(target.selects, roots)) if live or i < prefix]
         if kept:
+            if relocate_comments:
+                kept_ids = {id(projection) for projection in kept}
+                comments = [comment for projection in target.selects if id(projection) not in kept_ids
+                            for node in projection.walk() for comment in node.comments or []]
+                if comments:
+                    target.add_comments(comments)
             target.set("expressions", kept)
     return tree

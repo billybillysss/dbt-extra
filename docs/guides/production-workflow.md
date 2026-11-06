@@ -1,7 +1,7 @@
 # Production adoption checklist
 
 This is an adoption checklist, not a production-readiness certification. dbt-extra is
-currently 0.2.2. Validate its behavior on your data, dialect, adapter and deployment
+currently 0.2.3. Validate its behavior on your data, dialect, adapter and deployment
 environment before using it for a production workload.
 
 ## Reproducible review

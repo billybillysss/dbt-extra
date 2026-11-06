@@ -27,6 +27,30 @@ RULE_NAMES = {
 }
 
 
+# Small public fixtures for prose-bearing projections; the flag requires a
+# positive pruning result, or deliberately protects a cardinality/dependency root.
+COMMENT_PROJECTION_QUERIES = {
+    "subquery": ("SELECT q.id FROM (SELECT t.id, t.unused /* legacy timing columns */ AS unused FROM t) q", True),
+    "distinct": ("SELECT q.id FROM (SELECT DISTINCT t.id, t.unused /* legacy timing columns */ AS unused FROM t) q", False),
+    "ordinal_group": ("SELECT q.x FROM (SELECT t.id, t.x, t.unused /* legacy timing columns */ AS unused "
+                      "FROM t GROUP BY 1,2,3 ORDER BY 2,1) q", False),
+    "ordinal_order": ("SELECT q.id FROM (SELECT t.id, t.x /* legacy timing columns */ AS x "
+                      "FROM t ORDER BY 2,1 LIMIT 3) q ORDER BY q.id NULLS LAST", False),
+    "alias_order": ("SELECT q.id FROM (SELECT t.id, t.x /* legacy timing columns */ AS x "
+                    "FROM t ORDER BY x NULLS LAST, id NULLS LAST LIMIT 3) q ORDER BY q.id NULLS LAST", False),
+    "grouped": ("SELECT q.id, q.n FROM (SELECT t.id, COUNT(*) AS n, t.id /* legacy timing columns */ AS unused "
+                "FROM t GROUP BY t.id) q", True),
+    "global": ("SELECT q.k FROM (SELECT 1 AS k, COUNT(*) AS n, 2 /* legacy timing columns */ AS unused FROM t) q", True),
+    "left_fanout": ("SELECT q.id FROM (SELECT a.id, b.unused /* legacy timing columns */ AS unused "
+                    "FROM t a LEFT JOIN t b ON a.id=b.id) q", True),
+    "single_cte": ("WITH s AS (SELECT t.id, t.unused /* legacy timing columns */ AS unused FROM t) SELECT s.id FROM s", True),
+    "shared_cte": ("WITH s AS (SELECT t.id, t.x, t.unused /* legacy timing columns */ AS unused FROM t) "
+                   "SELECT s.id FROM s WHERE s.x>0 UNION ALL SELECT s.id FROM s WHERE s.x IS NULL", True),
+    "shared_live": ("WITH s AS (SELECT t.id, t.unused /* legacy timing columns */ AS unused FROM t) "
+                    "SELECT s.id FROM s UNION ALL SELECT s.unused AS id FROM s", False),
+}
+
+
 def assert_rule_exercised(rule, candidate, dialect, outcomes):
     tree = parse_one(candidate, read=dialect)
     if rule == "membership" and dialect not in {"duckdb", "spark"}:

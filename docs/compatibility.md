@@ -4,7 +4,7 @@
 
 | Surface | Current contract |
 | --- | --- |
-| Package | `dbt-extra`, version `0.2.2`; distributed through PyPI, pre-1.0. Executable `extra`, Python namespace `dbt_extra`. Pin and test upgrades. |
+| Package | `dbt-extra`, version `0.2.3`; distributed through PyPI, pre-1.0. Executable `extra`, Python namespace `dbt_extra`. Pin and test upgrades. |
 | Python | Metadata requires 3.11+. CI targets 3.11 and 3.13 on Linux, plus 3.13 on Windows. Other Python/platform combinations are not thereby certified. |
 | SQLGlot | Runtime dependency is `>=30.29.0`; the local function-gap catalog is checked against 30.29.0. Dialect availability does not establish warehouse execution support. |
 | Tool settings | Optional `extra_project.yaml`, `version: 2`; no transformation authoring schema. |

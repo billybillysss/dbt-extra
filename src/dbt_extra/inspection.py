@@ -80,7 +80,7 @@ def inspect(project, name, columns=None, *, boundaries=(), expanded=True, optimi
                 raise RejectedCandidate(str(exc)) from exc
 
         checkpoints.attempt("qualification", bind, provides=("bindings",))
-        checkpoints.attempt("projection_pruning", lambda t: prune_projections(t, dialect=dialect), requires=("bindings",))
+        checkpoints.attempt("projection_pruning", lambda t: prune_projections(t, dialect=dialect, relocate_comments=True), requires=("bindings",))
         apply_structural_rules(checkpoints, dialect, inspection=True)
         checkpoints.attempt("query_boundary_simplification", lambda t: simplify_query_boundaries(t, dialect), requires=("bindings",))
         checkpoints.attempt("literal_simplification", lambda t: simplify_source_expressions(t, dialect))

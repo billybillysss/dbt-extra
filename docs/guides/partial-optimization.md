@@ -78,6 +78,20 @@ Final whole-query output and round-trip checks still apply. Programming errors
 are not caught indiscriminately; unrecoverable parse, dependency-cycle and
 fixed-point failures retain the existing error contract.
 
+Comment validation compares exact text and duplicate counts between the original
+and candidate ASTs. Round-trip validation separately compares comment-free SQL
+renderings, allowing SQLGlot to reattach ordinary comments around aliases or CTEs
+([issue #1](https://github.com/billybillysss/dbt-extra/issues/1)). These checks do
+not prove execution equivalence or guarantee that rendering and reparsing retain
+every candidate comment; serializer comment fidelity is a separate concern.
+
+Inspection may prune an unused, otherwise-discardable projection carrying
+ordinary prose comments, moving those comments to its enclosing SELECT. Live
+projection comments retain their attachment. Unrecognized comment syntax,
+directive-like comments and optimizer hints remain protected, as do fallible,
+volatile and unknown evaluations. Source rewriting does not enable this comment
+relocation policy; its existing comment-based safety roots remain unchanged.
+
 Inspection issues carry `resource_id`, `reason` and transformation fields. Project
 optimization includes an `outcomes` list in each model's report.
 `optimize_source()` returns SQL and can populate an optional `outcomes` list; see
