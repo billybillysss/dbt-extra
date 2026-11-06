@@ -8,39 +8,89 @@
 <h1 align="center">dbt-extra</h1>
 
 <p align="center">
+  <a href="https://pypi.org/project/dbt-extra/"><img src="https://img.shields.io/pypi/v/dbt-extra?color=0D9488" alt="PyPI version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-0D9488" alt="License: MIT"></a>
   <a href="pyproject.toml"><img src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&amp;logoColor=white" alt="Python 3.11+"></a>
   <a href="https://github.com/billybillysss/dbt-extra/actions/workflows/ci.yml"><img src="https://github.com/billybillysss/dbt-extra/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="docs/index.md"><img src="https://img.shields.io/badge/docs-read-0D9488" alt="Documentation"></a>
 </p>
 
-dbt-extra is a Python library and CLI for reviewing native dbt projects offline.
-Trace column logic through upstream models, review SQL and metadata in Excel or
-CSV, and preview changes to the original SQL and YAML files.
+**Understand, optimize, and review dbt SQL—without running dbt.**
 
-It reads authored dbt files and optional artifacts. It does not run dbt, execute
-arbitrary Jinja, or connect to a warehouse. No initialization is required.
+dbt-extra is a Python library and CLI for working with existing dbt projects locally.
+Trace column logic through upstream models, simplify and optimize supported SQL,
+and review or edit SQL and metadata in Excel or CSV.
+
+Preview proposed changes before applying them to your original SQL and YAML files.
+Your dbt project remains the source of truth.
+
+No initialization or warehouse connection is required. dbt-extra reads authored
+dbt files and optional artifacts without running dbt or executing arbitrary Jinja.
+
+| Understand | Optimize | Review together |
+| --- | --- | --- |
+| Follow a column across models and see simplified SQL | Preview guarded rewrites to authored model files | Edit supported Excel/CSV fields, then review the SQL/YAML diff |
 
 ## Install and try it
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/):
+Requires Python 3.11+. Install the standalone CLI with
+[uv](https://docs.astral.sh/uv/):
+
+```bash
+uv tool install dbt-extra
+extra --version
+```
+
+Already have a dbt project? Run inside it, replacing the dialect, model and column
+with your own:
+
+```bash
+extra --dialect snowflake inspect your_model --columns your_column
+extra --dialect snowflake optimize --select your_model --preview
+extra --dialect snowflake export --format xlsx --select your_model
+```
+
+Install from [PyPI](https://pypi.org/project/dbt-extra/) in an existing uv-managed
+Python project:
+
+```bash
+uv add dbt-extra
+uv run extra --version
+```
+
+The executable is `extra`; Python imports use `dbt_extra`.
+
+### Try the bundled demo
+
+From a source checkout (repository access is required while the repository is
+private):
 
 ```bash
 git clone https://github.com/billybillysss/dbt-extra.git
 cd dbt-extra
 uv sync --locked
 cd examples/jaffle_shop
-uv run extra inspect customer_revenue --columns revenue
+uv run extra inspect customer_profile --columns customer_name
+uv run extra optimize --select gld_optimizer_projections --preview
+uv run extra export --format xlsx --select customer_revenue
 ```
 
-The explanation follows `customer_revenue → orders → demo_raw_orders`. It keeps
-the completed-order filter, decimal cast and customer grouping even though only
-`revenue` is selected. Inspection changes no files and does not execute the SQL.
+The first command follows a column through three models to its cleaning expression:
 
-This checkout is the private **0.2.1 preview**; cloning requires repository access.
-The executable is `extra`, and Python imports use `dbt_extra`. For pip, create and
-activate a Python 3.11+ virtual environment, then run `python -m pip install .`
-from the repository root. Use `extra` instead of `uv run extra` afterward.
+```sql
+SELECT
+  TRIM("customers".first_name) AS "customer_name"
+FROM main_raw.raw_customers AS "customers";
+```
+
+The second previews unused-column and CTE removal in an authored model; the third
+creates an editable review workbook. Inspection and optimization previews change
+no files and execute no SQL.
+
+For the complete **three models → readable SQL → optimizer diff → Excel edit →
+YAML diff** demonstration, see the [five-step demo](docs/guides/five-step-demo.md).
+Its runnable script uses a temporary project copy and needs neither Excel nor dbt
+installed.
 
 The examples below run from `examples/jaffle_shop` unless noted. Inspection and
 previews are read-only; export creates review files. Use a disposable project copy
@@ -50,13 +100,13 @@ or review branch before applying source changes.
 
 | Command | Purpose | Writes without `--preview` |
 | --- | --- | --- |
-| [`init`](#configure-an-existing-project) | Create optional tool settings in an existing dbt project | New `extra_project.yaml`; refuses overwrite |
-| [`validate`](#validate-a-project) | Check local structure, supported static SQL and reference cycles | Nothing |
 | [`inspect MODEL`](#inspect-model-and-column-logic) | Explain model or selected-column SQL; show a logical plan | Nothing |
+| [`optimize`](#optimize-authored-sql) | Rewrite authored SQL; optionally expand static local macros | Selected model SQL |
 | [`export`](#review-and-edit-in-excel) | Export folder-grouped XLSX, flat CSV or read-only JSON | Review files |
 | [`import PATH`](#review-and-edit-in-excel) | Apply supported review edits with baseline checks | Original SQL/YAML |
-| [`optimize`](#optimize-authored-sql) | Rewrite authored SQL; optionally expand static local macros | Selected model SQL |
 | [`enrich`](#fill-missing-column-metadata) | Fill missing inferred types and passthrough descriptions | Existing dbt property YAML |
+| [`validate`](#validate-a-project) | Check local structure, supported static SQL and reference cycles | Nothing |
+| [`init`](#configure-an-existing-project) | Create optional tool settings in an existing dbt project | New `extra_project.yaml`; refuses overwrite |
 
 Every writing command supports `--preview`, which writes nothing, including
 directories and temporary files. Review source diffs before applying them.
@@ -321,6 +371,10 @@ Include upstream resources explicitly; selecting a model does not automatically
 export its dependencies. JSON is for analysis/integrations and cannot be imported.
 
 ## Optimize authored SQL
+
+Optimization uses guarded static rewrites; it does not estimate warehouse costs or
+guarantee faster queries. Inspection simplifies a read-only explanation;
+`optimize` proposes edits to the authored model without inlining upstream models.
 
 Preview changes to the actual model file, not a compiled copy:
 
@@ -663,6 +717,7 @@ See [compatibility](docs/compatibility.md),
 
 - [Documentation index](docs/index.md)
 - [Native Jaffle Shop example](examples/jaffle_shop/README.md)
+- [Five-step demo](docs/guides/five-step-demo.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [License](LICENSE)
 

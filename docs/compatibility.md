@@ -4,7 +4,7 @@
 
 | Surface | Current contract |
 | --- | --- |
-| Package | `dbt-extra`, version `0.2.1`; private preview, pre-1.0. Executable `extra`, Python namespace `dbt_extra`. Pin and test upgrades. |
+| Package | `dbt-extra`, version `0.2.1`; published on PyPI, pre-1.0. Executable `extra`, Python namespace `dbt_extra`. Pin and test upgrades. |
 | Python | Metadata requires 3.11+. CI targets 3.11 and 3.13 on Linux, plus 3.13 on Windows. Other Python/platform combinations are not thereby certified. |
 | SQLGlot | Runtime dependency is `>=30.29.0`; the local function-gap catalog is checked against 30.29.0. Dialect availability does not establish warehouse execution support. |
 | Tool settings | Optional `extra_project.yaml`, `version: 2`; no transformation authoring schema. |
@@ -63,12 +63,14 @@ alone does not certify enrichment or warehouse execution.
 
 ## Distribution status
 
-Install the private preview from an authorized source checkout and record its
-Git commit when reporting results. Public access requires separate maintainer
-approval; the presence of release automation does not imply publication.
+Version `0.2.1` is available on [PyPI](https://pypi.org/project/dbt-extra/).
+Install with `uv tool install dbt-extra` for the CLI or `uv add dbt-extra` for a
+project dependency. Record the installed version when reporting results; for a
+source checkout, also record the Git commit.
 
-Public visibility, package publication and branding are separate release gates;
-see the [release checklist](development/releasing.md).
+Package availability does not imply public source access. The GitHub repository
+is currently private; source examples and linked GitHub documentation require
+repository access. Package and source availability are independent.
 
 ## Upgrade policy
 

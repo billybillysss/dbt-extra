@@ -22,7 +22,6 @@ from tests.helpers import optimizer_inputs, snapshot
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples/jaffle_shop"
-COLUMN_TRACE = ROOT / "examples/column_trace"
 DOCUMENTS = sorted({
     *ROOT.glob("*.md"), *(ROOT / "docs").rglob("*.md"),
     *(ROOT / "examples").rglob("README.md"),
@@ -34,13 +33,6 @@ DOCUMENTS = sorted({
 def dbt_example(tmp_path):
     destination = tmp_path / "examples/jaffle_shop"
     shutil.copytree(EXAMPLE, destination, ignore=shutil.ignore_patterns("target", "logs", "extra", "dbt_packages"))
-    return destination
-
-
-@pytest.fixture
-def column_trace(tmp_path):
-    destination = tmp_path / "examples/column_trace"
-    shutil.copytree(COLUMN_TRACE, destination)
     return destination
 
 
@@ -71,6 +63,7 @@ def test_local_markdown_links(path):
             continue
         target = (path.parent / unquote(parsed.path)).resolve() if parsed.path else path
         assert target.is_relative_to(ROOT), f"{path}: link leaves repository: {href}"
+        assert not target.is_relative_to(ROOT / "local"), f"{path}: public link to owner-only notes: {href}"
         assert target.exists(), f"{path}: missing local link: {href}"
         if parsed.fragment and target.suffix == ".md":
             assert unquote(parsed.fragment) in anchors(target.read_text(encoding="utf-8")), f"{path}: missing anchor: {href}"
@@ -156,6 +149,7 @@ def test_readme_column_trace_matches_project_and_cli(dbt_example):
     assert result.exit_code == 0, result.output
     query = "\n".join(line for line in result.output.splitlines() if not line.startswith("--"))
     assert query.strip() == shown[0].strip()
+    assert blocks(readme, "sql")[0].strip() == query.strip()
     assert "{{" not in query
     assert "main_raw.raw_customers" in query
     assert 'TRIM("customers".first_name)' in query
@@ -326,6 +320,54 @@ def test_documented_description_review_round_trip(dbt_example, document):
     assert next(model for model in models if model["name"] == "customer_revenue")["description"] == description
 
 
+def test_five_step_demo_sql_matches_inspection_and_source_proposal(dbt_example):
+    from dbt_extra.optimization import optimize
+
+    guide = (ROOT / "docs/guides/five-step-demo.md").read_text(encoding="utf-8")
+    shown = blocks(guide, "sql")
+    assert len(shown) == 3
+    before = snapshot(dbt_example)
+    result = CliRunner().invoke(cli, ["--project-dir", str(dbt_example), "inspect",
+        "customer_profile", "--columns", "customer_name"])
+    assert result.exit_code == 0, result.output
+    query = "\n".join(line for line in result.output.splitlines() if not line.startswith("--"))
+    assert query.strip() == shown[0].strip()
+
+    project = Project(dbt_example)
+    resource = project.find_model("gld_optimizer_projections")
+    changes, skipped = optimize(project, select=[resource.name])
+    assert not skipped
+    original = resource.code.replace("\r\n", "\n")
+    proposed = changes.changed()[resource.path].decode("utf-8").replace("\r\n", "\n")
+    for code, expected in zip((original, proposed), shown[1:]):
+        parsed = parse_authored(code, project.dialect)
+        assert code.removeprefix(parsed.prefix).strip() == expected.strip()
+    assert snapshot(dbt_example) == before
+
+
+def test_five_step_demo_preserves_examples_and_cleans_temporary_files(dbt_example, tmp_path, monkeypatch, capsys):
+    from scripts import demo_review
+
+    before = snapshot(dbt_example)
+    temporary = tmp_path / "demo"
+    temporary.mkdir()
+    monkeypatch.setattr(demo_review, "ROOT", dbt_example.parents[1])
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("EXTRA_PROJECT_DIR", str(tmp_path / "not-a-project"))
+    demo_review.main(["--temp-dir", str(temporary)])
+    output = capsys.readouterr().out
+    assert all(f"{step}/5 - " in output for step in range(1, 6))
+    assert 'TRIM("customers".first_name)' in output
+    assert "gld_optimizer_projections.sql" in output
+    assert "Optimization SQL files written: 0" in output
+    assert "models/schema.yml" in output.replace("\\", "/")
+    assert f"+    description: {demo_review.DESCRIPTION}" in output
+    assert "All original project files are unchanged" in output
+    assert "Temporary demo files removed." in output
+    assert snapshot(dbt_example) == before
+    assert list(temporary.iterdir()) == []
+
+
 @pytest.mark.parametrize("name", ["bug_report", "feature_request"])
 @pytest.mark.skipif(not (ROOT / ".github").is_dir(), reason="GitHub metadata is not shipped in source distributions")
 def test_github_issue_forms_have_valid_required_inputs(name):
@@ -369,13 +411,12 @@ def test_readme_has_a_command_example_for_every_cli_feature():
         assert re.search(rf"^(?:uv run )?extra (?:--dialect \w+ )?{name}(?: |$)", commands, re.MULTILINE), name
 
 
-def test_readme_cli_walkthrough_preserves_dbt_inputs(dbt_example, column_trace, monkeypatch):
+def test_readme_cli_walkthrough_preserves_dbt_inputs(dbt_example, monkeypatch):
     """Check runnable syntax; the separate round-trip test supplies the Excel edit."""
     monkeypatch.delenv("EXTRA_PROJECT_DIR", raising=False)
     monkeypatch.chdir(dbt_example)
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     before = snapshot(dbt_example)
-    trace_before = snapshot(column_trace)
     runner = CliRunner()
     for block in blocks(readme, "bash"):
         for line in block.splitlines():
@@ -388,7 +429,6 @@ def test_readme_cli_walkthrough_preserves_dbt_inputs(dbt_example, column_trace, 
             if arguments[0] in {"inspect", "validate"} or "--preview" in arguments:
                 assert snapshot(dbt_example) == previous
     after = snapshot(dbt_example)
-    assert snapshot(column_trace) == trace_before
     assert all(after[path] == content for path, content in before.items())
     assert {path for path in after if path not in before} == {
         "extra/review/review.xlsx", "extra/review-expanded/review.xlsx",

@@ -8,6 +8,15 @@ changes receive a version and an ISO 8601 release date when released.
 
 ## [Unreleased]
 
+### Changed
+
+- Add a reproducible five-step demo, with static SQL
+  optimization boundaries and no warehouse performance claims.
+- Document PyPI installation with `uv add dbt-extra` and the standalone uv tool
+  option in the README.
+- Consolidate column-tracing examples in `examples/jaffle_shop`, including the
+  retained-join walkthrough, and remove the redundant standalone example.
+
 ## [0.2.1] - 2026-11-05
 
 ### Added

@@ -30,6 +30,7 @@ def check_archives():
         assert "slbt =" not in entries
         assert archive.read(f"dbt_extra-{version}.dist-info/licenses/LICENSE") == license_text
         names = set(archive.namelist())
+        assert not any(name.startswith("local/") for name in names), "wheel includes owner-only notes"
         for package in ("project", "sql", "analysis", "review", "files"):
             assert f"dbt_extra/{package}/__init__.py" in names
         assert not any(name.startswith(("dbt_extra/native/", "dbt_extra/compiler/", "dbt_extra/definitions/", "dbt_extra/catalog/")) for name in names)
@@ -37,6 +38,7 @@ def check_archives():
     with tarfile.open(source) as archive:
         prefix = f"dbt_extra-{version}/"
         names = set(archive.getnames())
+        assert not any(name.startswith(prefix + "local/") for name in names), "sdist includes owner-only notes"
         metadata = archive.extractfile(prefix + "PKG-INFO").read().decode()
         assert "License-Expression: MIT\n" in metadata
         assert "License-File: LICENSE\n" in metadata

@@ -1,9 +1,26 @@
 # Getting started
 
-Start with the bundled project, then try one model from your own dbt project.
-extra runs offline: no warehouse credentials or dbt compilation are needed.
+Understand, optimize, and review an existing dbt project locally. No initialization,
+warehouse credentials or dbt compilation are needed.
 
-## Install from this checkout
+## Install
+
+Requires Python 3.11+. Install the standalone CLI from PyPI:
+
+```bash
+uv tool install dbt-extra
+extra --version
+```
+
+Or add the Python library to a uv-managed project with `uv add dbt-extra` and use
+`uv run extra`. With pip, use `python -m pip install dbt-extra` in a virtual environment.
+The executable is `extra`; Python imports use `dbt_extra`.
+
+Go to [use an existing dbt project](#use-an-existing-dbt-project), or follow the
+bundled examples below. The [five-step demo](guides/five-step-demo.md) automates
+column inspection, optimizer previews and an Excel-to-YAML edit in a temporary copy.
+
+### Install the source examples
 
 Install Python 3.11+ and [uv](https://docs.astral.sh/uv/), then:
 
@@ -14,8 +31,8 @@ uv sync --locked
 uv run extra --version
 ```
 
-This is the private `0.2.1` preview; cloning requires repository access.
-The executable is `extra`; Python imports use `dbt_extra`.
+Cloning requires repository access while the source repository is private; the
+published package can be installed from PyPI independently.
 See [compatibility](compatibility.md) for supported versions and limitations.
 
 Prefer pip? From the cloned repository, create and activate a virtual environment
@@ -86,6 +103,20 @@ Open `extra/review/review.xlsx`. Follow the
 [round-trip walkthrough](guides/catalog-round-trip.md) to edit a description and
 preview the YAML diff. Export creates review files, not new dbt models.
 
+## Preview SQL optimization
+
+From the bundled project directory:
+
+```bash
+uv run extra optimize --select gld_optimizer_projections --preview
+```
+
+The proposal removes unused projections, redundant CTEs and `AND TRUE`, retaining
+the dbt reference and meaningful filter. Preview changes no files. Optimization
+uses guarded static rewrites, not warehouse cost estimates or guaranteed speedups.
+See [inspection and optimization](guides/inspection-and-optimization.md) before
+applying source changes.
+
 ## Use an existing dbt project
 
 No generated-model directory or new model language is needed. With an installed CLI:
@@ -94,6 +125,7 @@ No generated-model directory or new model language is needed. With an installed 
 cd /path/to/project
 extra --dialect duckdb validate
 extra --dialect duckdb inspect your_model --columns your_column
+extra --dialect duckdb optimize --select your_model --preview
 extra --dialect duckdb export --format xlsx --select your_model
 extra --dialect duckdb import extra/review/review.xlsx --preview
 ```

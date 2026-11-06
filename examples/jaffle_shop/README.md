@@ -33,6 +33,10 @@ extra --project-dir examples/jaffle_shop enrich --select customer_revenue --prev
 
 ## Trace a customer name
 
+For the complete column trace, optimizer preview and Excel-to-YAML workflow,
+run the [five-step demo](../../docs/guides/five-step-demo.md) from the repository
+root. It uses a temporary copy and leaves these teaching inputs unchanged.
+
 From this directory in the source checkout:
 
 ```bash
@@ -62,6 +66,15 @@ grouping and necessary evaluation boundaries. Simplification does not promise
 to remove every CTE or subquery from every model.
 
 </details>
+
+For a selected-column example that retains joins, run:
+
+```bash
+uv run extra inspect gld_optimizer_customer_profile --columns first_name
+```
+
+This traces the cleaned customer name through `gld_customers` while retaining
+joins whose removal is not proven safe, even when their outputs are not selected.
 
 ## More examples
 

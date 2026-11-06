@@ -22,7 +22,8 @@ the fixture tree, including any existing dbt logs and outputs.
 - `sql/`, `project/`, `analysis/`: focused shared primitives and dependency boundaries.
 - `test_yaml_style.py`: block-style repository and documentation YAML.
 - `test_documentation.py`: local Markdown paths/anchors, parsed JSON examples,
-  documented SQL/YAML proposals, CLI option coverage and Python API examples.
+  documented SQL/YAML proposals, CLI option coverage, Python API examples and the
+  temporary-copy five-step demo.
 - `test_branding.py`: package/command identity, config/environment discovery,
   review envelopes, safe release automation and README references.
 - `test_logo.py`: valid, accessible, self-contained SVG assets.
@@ -159,7 +160,7 @@ installation too. The versioned wheel path above must match the version built.
 The validation workflow uses an isolated environment and does not publish packages.
 The [release workflow](https://github.com/billybillysss/dbt-extra/blob/HEAD/.github/workflows/release.yml)
 calls validation before building and publishing to PyPI on `v*` tags or manual
-dispatch; see [releasing](releasing.md) before triggering it.
+dispatch. Normal pushes and pull requests run validation without publishing.
 
 The package job also installs pytest and DuckDB into the wheel environment and
 runs the full suite against freshly resolved runtime dependencies. This is

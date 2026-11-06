@@ -1,7 +1,7 @@
 [project]
 name = "dbt-extra"
 dynamic = ["version"]
-description = "Offline dbt transformation review, inspection, editing, and optimization"
+description = "Understand, optimize, and review dbt SQL locally, with Excel/CSV editing and SQL/YAML change previews"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -35,6 +35,7 @@ path = "src/dbt_extra/__init__.py"
 
 [tool.hatch.build.targets.sdist]
 include = ["/src", "/tests", "/docs", "/scripts", "/examples", "/pyproject.toml", "/uv.lock", "/README.md", "/LICENSE", "/CONTRIBUTING.md", "/SECURITY.md", "/CHANGELOG.md"]
+exclude = ["/local"]
 
 [dependency-groups]
 dev = ["dbt-duckdb>=1.10.0", "pytest>=9.1.1", "pytest-xdist>=3.8.0"]

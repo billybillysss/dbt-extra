@@ -1,6 +1,0 @@
-name: column_trace
-version: '1.0.0'
-config-version: 2
-profile: column_trace
-model-paths:
-  - models

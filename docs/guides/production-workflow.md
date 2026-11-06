@@ -79,5 +79,5 @@ revalidate and re-export reviews; do not assume automatic recovery.
   even if a command exits successfully.
 - On upgrades, compare generated SQL/JSON and result tests before rollout.
 
-See [security](../../SECURITY.md), [compatibility](../compatibility.md),
-[testing](../development/testing.md) and [release checks](../development/releasing.md).
+See [security](../../SECURITY.md), [compatibility](../compatibility.md) and
+[distribution checks](../development/testing.md#distribution-checks).
