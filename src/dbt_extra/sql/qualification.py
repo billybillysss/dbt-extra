@@ -1,7 +1,5 @@
 """Qualification for authored rewrites: unknown columns are not absent columns."""
 
-from inspect import signature
-
 from sqlglot import exp, parse_one
 from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
 from sqlglot.optimizer.qualify import qualify
@@ -10,11 +8,7 @@ from sqlglot.optimizer.scope import Scope, traverse_scope
 from sqlglot.schema import MappingSchema, ensure_schema
 
 from dbt_extra.errors import SpecError
-
-
-# SQLGlot 30.24 removed this option; 30.8 needs it for unknown single inputs
-# alongside known schemas. Our own guard always rejects ambiguous inference.
-INFER_SCHEMA_OPTIONS = {"infer_schema": True} if "infer_schema" in signature(qualify).parameters else {}
+from dbt_extra.sql.safety import discardable
 
 
 class SourceSchema(MappingSchema):
@@ -48,8 +42,6 @@ def bind_single_inputs(tree, schema, dialect):
     Authored callers must run check_bindings first. Inspection is separately
     best-effort and historically enabled native inference for these inputs.
     """
-    if INFER_SCHEMA_OPTIONS:
-        return tree
     schema = ensure_schema(schema or {}, dialect=dialect)
     tree = qualify_tables(normalize_identifiers(tree.copy(), dialect=dialect,
                           store_original_column_identifiers=True), dialect=dialect)
@@ -59,7 +51,9 @@ def bind_single_inputs(tree, schema, dialect):
             alias, (_, source) = inputs[0]
             if isinstance(source, exp.Table) and not schema.column_names(source):
                 for column in scope.columns:
-                    if not column.table:
+                    alias_reference = (column.find_ancestor(exp.Qualify)
+                                       and column.name in scope.expression.named_selects)
+                    if not column.table and not alias_reference:
                         column.set("table", exp.to_identifier(alias))
     return tree
 
@@ -84,7 +78,7 @@ def remember_schema_outputs(tree, schema):
             if isinstance(projection, exp.Alias) and isinstance(projection.this, exp.Column):
                 alias = projection.args["alias"]
                 spelling = projection.this.this.meta.get("extra_spelling")
-                if "extra_spelling" not in alias.meta and spelling:
+                if "extra_spelling" not in alias.meta and spelling and alias.name == projection.this.name:
                     alias.meta["extra_spelling"] = spelling
 
 
@@ -134,8 +128,14 @@ def check_bindings(tree, schema, dialect, *, strict=True):
 def qualify_source(tree, schema, dialect):
     schema = check_bindings(tree, schema, dialect)
     qualified = qualify(
-        bind_single_inputs(tree.copy(), schema, dialect), dialect=dialect, schema=schema, **INFER_SCHEMA_OPTIONS,
+        bind_single_inputs(tree.copy(), schema, dialect), dialect=dialect, schema=schema,
         validate_qualify_columns=True, quote_identifiers=True, identify=False,
+        # Alias expansion copies expressions. Recognition is not proof that a
+        # function/cast/arithmetic expression may be evaluated an extra time.
+        # Local null-check removal proofs do not grant alias-duplication permission.
+        expand_alias_refs=tree.find(exp.Qualify) is None and all(
+            discardable(p, dialect) and p.find(exp.Anonymous) is None
+            for s in tree.find_all(exp.Select) for p in s.selects),
     )
     if any(p.is_star for scope in traverse_scope(qualified) for p in scope.expression.selects):
         raise SpecError("Projection star could not be completely expanded")

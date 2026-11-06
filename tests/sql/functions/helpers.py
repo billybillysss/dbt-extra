@@ -6,15 +6,15 @@ import pytest
 from sqlglot import exp, parse_one
 
 from dbt_extra.analysis import analyze
-from dbt_extra.analysis.types import inferred_types
+from dbt_extra.analysis.type_inference import inferred_types
 from dbt_extra.enrichment import enrich
 from dbt_extra.errors import SpecError
-from dbt_extra.optimization import optimize_source
+from dbt_extra.sql.rewrites.engine import optimize_source
 from dbt_extra.project import Project
 from dbt_extra.sql.functions import function_shape, function_spec
-from dbt_extra.sql.inspection_rules import plain_queries, pushdown_safe_predicates
+from dbt_extra.sql.rewrites.structural import plain_queries, pushdown_safe_predicates
 from dbt_extra.sql.parser import parse_authored
-from dbt_extra.sql.scopes import volatile
+from dbt_extra.sql.safety import has_evaluation_barrier
 from tests.helpers import put, snapshot
 
 
@@ -69,9 +69,16 @@ def typing(dialect, spec):
 def safety(dialect, spec):
     code = "WITH base AS (SELECT " + spec.example + " AS result FROM t) SELECT result FROM base"
     tree = parse_authored(code, dialect).tree
-    assert volatile(tree), "Recognition alone must not authorize dropping/reordering evaluation"
-    with pytest.raises(SpecError, match="Volatile or unknown"):
-        optimize_source(code, dialect, schema={"t": {"id": "BIGINT"}})
+    assert has_evaluation_barrier(tree), "Recognition alone must not authorize dropping/reordering evaluation"
+    outcomes = []
+    result = parse_authored(optimize_source(code, dialect, schema={"t": {"id": "BIGINT"}}, outcomes=outcomes), dialect).tree
+    def calls(query):
+        return [n.transform(lambda c: exp.Column(this=c.this.copy()) if isinstance(c, exp.Column) else c).sql(dialect=dialect)
+                for n in query.find_all(exp.Anonymous)]
+
+    before, after = calls(tree), calls(result)
+    assert after == before, "Opaque evaluations must not be erased, duplicated or rewritten"
+    assert any(i["status"] == "blocked" for i in outcomes)
     if spec.kind in {"aggregate", "generator", "window"}:
         assert not plain_queries(tree, aggregates=True)
         assert pushdown_safe_predicates(tree.copy(), dialect) == tree
@@ -82,7 +89,7 @@ def enrichment(native, dialect, spec):
     yaml = put(native, "models/function_example.yml", "version: 2\nmodels:\n  - name: function_example\n")
     project = Project(native, dialect=dialect)
     before = snapshot(native)
-    analysis = analyze(project, project.find("function_example"))
+    analysis = analyze(project, project.find_model("function_example"))
     expected = exp.DataType.build(spec.returns, dialect=dialect).sql(dialect=dialect) if spec.returns else None
     column = next((c for c in analysis["columns"] if c["name"] == "result"), {})
     assert column.get("inferred_type") == expected, analysis
@@ -92,7 +99,7 @@ def enrichment(native, dialect, spec):
     if expected:
         assert set(changes.changed()) == {yaml}
         changes.apply()
-        assert Project(native, dialect=dialect).find("function_example").columns["result"]["data_type"] == expected
+        assert Project(native, dialect=dialect).find_model("function_example").columns["result"]["data_type"] == expected
     else:
         assert not changes.changed()
 

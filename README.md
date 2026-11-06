@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<h1 align="center">dbt-extra — dbt transformation review and inspection</h1>
+<h1 align="center">dbt-extra</h1>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-0D9488" alt="License: MIT"></a>
@@ -14,448 +14,424 @@
   <a href="docs/index.md"><img src="https://img.shields.io/badge/docs-read-0D9488" alt="Documentation"></a>
 </p>
 
-<p align="center">
-  <a href="docs/getting-started.md">Get started</a> · <a href="docs/index.md">Documentation</a> · <a href="docs/guides/ai-assisted-workflow.md">AI-assisted workflow</a> · <a href="examples/jaffle_shop/README.md">Native dbt demo</a> · <a href="CONTRIBUTING.md">Contributing</a>
-</p>
+dbt-extra is a Python library and CLI for reviewing native dbt projects offline.
+Trace column logic through upstream models, review SQL and metadata in Excel or
+CSV, and preview changes to the original SQL and YAML files.
 
-**Trace a dbt column back to its SQL. Review transformations in Excel.
-Preview edits to the original files—all offline.**
+It reads authored dbt files and optional artifacts. It does not run dbt, execute
+arbitrary Jinja, or connect to a warehouse. No initialization is required.
 
-Where does `revenue` come from? Which filters change it? Can a reviewer update
-its description without hunting through YAML? dbt-extra helps answer those questions
-using the dbt project you already have. No warehouse credentials, dbt compilation,
-or second model language required.
+## Install and try it
 
-## See where a column comes from
-
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/). From a terminal:
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/):
 
 ```bash
 git clone https://github.com/billybillysss/dbt-extra.git
 cd dbt-extra
 uv sync --locked
 cd examples/jaffle_shop
-uv run extra inspect customer_revenue --columns revenue --compile false
+uv run extra inspect customer_revenue --columns revenue
 ```
 
-The bundled example follows `customer_revenue → orders → demo_raw_orders`.
-The explanation retains the **completed-order filter**, **decimal cast** and
-**per-customer grouping**, even though you selected only `revenue`.
+The explanation follows `customer_revenue → orders → demo_raw_orders`. It keeps
+the completed-order filter, decimal cast and customer grouping even though only
+`revenue` is selected. Inspection changes no files and does not execute the SQL.
 
-<details>
-<summary>See the SQL output (CLI comments omitted)</summary>
+This checkout is the private **0.2.1 preview**; cloning requires repository access.
+The executable is `extra`, and Python imports use `dbt_extra`. For pip, create and
+activate a Python 3.11+ virtual environment, then run `python -m pip install .`
+from the repository root. Use `extra` instead of `uv run extra` afterward.
+
+The examples below run from `examples/jaffle_shop` unless noted. Inspection and
+previews are read-only; export creates review files. Use a disposable project copy
+or review branch before applying source changes.
+
+## Features
+
+| Command | Purpose | Writes without `--preview` |
+| --- | --- | --- |
+| [`init`](#configure-an-existing-project) | Create optional tool settings in an existing dbt project | New `extra_project.yaml`; refuses overwrite |
+| [`validate`](#validate-a-project) | Check local structure, supported static SQL and reference cycles | Nothing |
+| [`inspect MODEL`](#inspect-model-and-column-logic) | Explain model or selected-column SQL; show a logical plan | Nothing |
+| [`export`](#review-and-edit-in-excel) | Export folder-grouped XLSX, flat CSV or read-only JSON | Review files |
+| [`import PATH`](#review-and-edit-in-excel) | Apply supported review edits with baseline checks | Original SQL/YAML |
+| [`optimize`](#optimize-authored-sql) | Rewrite authored SQL; optionally expand static local macros | Selected model SQL |
+| [`enrich`](#fill-missing-column-metadata) | Fill missing inferred types and passthrough descriptions | Existing dbt property YAML |
+
+Every writing command supports `--preview`, which writes nothing, including
+directories and temporary files. Review source diffs before applying them.
+
+The [Python API](#use-the-python-api) also supports project analysis, column
+lineage, review workflows, explicit change proposals and standalone SQL optimization.
+
+## Inspect model and column logic
+
+### Trace a column through multiple dbt layers
+
+Trace `customer_profile.customer_name` through three models in the bundled
+[Jaffle Shop project](examples/jaffle_shop/README.md):
+
+```bash
+uv run extra inspect customer_profile --columns customer_name
+```
+
+Inspection follows the rename back to the original name-cleaning expression,
+removing redundant CTEs, subqueries and unused outputs. SQL output (CLI comments
+omitted; without optional dbt artifacts):
 
 ```sql
 SELECT
-  "extra_selected_output"."revenue" AS "revenue"
-FROM (
-  WITH order_totals AS (
-    SELECT
-      SUM(CAST("extra_input_2".amount AS DECIMAL(12, 2))) AS revenue
-    FROM {{ ref('demo_raw_orders') }} AS "extra_input_2"
-    WHERE
-      "extra_input_2".status = 'completed'
-    GROUP BY
-      "extra_input_2".customer_id
-  )
-  SELECT
-    order_totals.revenue + 0 AS revenue
-  FROM order_totals AS order_totals
-) AS "extra_selected_output";
+  TRIM("customers".first_name) AS "customer_name"
+FROM main_raw.raw_customers AS "customers";
 ```
 
-This is a definition explanation, not executed SQL or proof about stored data.
-The seed remains an explicit boundary. Authored files are unchanged.
+<details>
+<summary>Compare with optimization disabled</summary>
+
+The same column, expanded through all three models without simplification:
+
+```bash
+uv run extra inspect customer_profile --columns customer_name --optimize false
+```
+
+SQL output (CLI comments omitted; without optional dbt artifacts):
+
+```sql
+SELECT
+  "customer_profile"."customer_name" AS "customer_name"
+FROM (
+  SELECT
+    customer_id,
+    first_name AS customer_name,
+    last_name
+  FROM (
+    WITH customer_input AS (
+      SELECT
+        customer_id,
+        first_name,
+        last_name
+      FROM (
+        SELECT
+          id AS customer_id,
+          TRIM(first_name) AS first_name,
+          last_name
+        FROM main_raw.raw_customers
+      ) AS "customers"
+    )
+    SELECT
+      customer_id,
+      first_name,
+      last_name
+    FROM customer_input
+  ) AS "customer_details"
+) AS "customer_profile";
+```
+
+The default optimized version removes the redundant wrappers, CTE and unused
+outputs while preserving the name-cleaning expression. Both commands are read-only.
 
 </details>
 
-Stop at an upstream model with `--from orders`, or use `--view plan` for a logical
-tree. [Try the walkthrough →](docs/getting-started.md)
-
-> **Private preview · 0.2.0:** install from this checkout with repository access.
-> The executable is `extra`; Python imports use `dbt_extra`.
-
-## Pick your workflow
-
-| Feature | What it does | Writes by default |
-| --- | --- | --- |
-| [`init`](#use-your-existing-dbt-project) | Add optional tool settings to an existing dbt project; refuse overwrite. | New `extra_project.yaml` only |
-| [`validate`](#validate-offline) | Check local resources, Jinja structure, supported static SQL and reference cycles. | Nothing |
-| [`inspect`](#inspect-sql-columns-and-logical-plans) | Explain full models or selected columns, keeping filters, joins, grouping and row multiplicity. | Nothing |
-| [`export`](#review-in-excel-or-csv-apply-through-a-diff) | Export folder-grouped XLSX, flat CSV, or read-only JSON analysis. | Review outputs only |
-| [`import`](#review-in-excel-or-csv-apply-through-a-diff) | Patch supported review edits back to their original dbt files, with baseline checks. | Original SQL/YAML |
-| [`optimize`](#preview-authored-sql-cleanup) | Conservatively rewrite authored SQL; optionally expand local macros. | Selected model SQL |
-| [`enrich`](#fill-missing-metadata-with-real-yaml) | Fill missing inferred types and safe passthrough descriptions. | Existing dbt property YAML |
-
-**Every writing command supports `--preview`, which writes
-nothing—not even output directories or temporary files.** Without it, the writes
-listed above apply. The examples below run from `examples/jaffle_shop` after the
-setup above. They use `extra`; with this checkout, use `uv run extra` instead
-(uv finds the repository environment from subdirectories). `--locked` is only
-needed on the installation command shown above.
-
-Jump to [project settings](#use-your-existing-dbt-project) ·
-[inspection](#inspect-sql-columns-and-logical-plans) ·
-[Excel/CSV](#review-in-excel-or-csv-apply-through-a-diff) ·
-[JSON/AI](#export-read-only-analysis-for-an-ai-assistant) ·
-[optimization](#preview-authored-sql-cleanup) ·
-[YAML enrichment](#fill-missing-metadata-with-real-yaml) ·
-[selectors](#select-models-folders-and-tags) · [Python](#python-api).
-
-## Use your existing dbt project
-
-There is one project root: the directory containing `dbt_project.yml`. Run inside
-that project (or a subdirectory), and supply its actual SQL dialect:
-
-```bash
-cd path/to/your/dbt_project
-extra --dialect snowflake inspect your_model --columns your_column
+```text
+customer_profile.customer_name
+  ← customer_details.first_name
+  ← stg_customers.first_name
+  ← TRIM(jaffle_shop.customers.first_name)
 ```
 
-When running outside the project, choose it once with the environment variable:
+<details>
+<summary>See the three original model definitions</summary>
 
-```bash
-export EXTRA_PROJECT_DIR=/path/to/your/dbt_project
-extra --dialect snowflake inspect your_model --columns your_column
-```
+These teaching inputs deliberately contain a redundant CTE and unused columns.
 
-In PowerShell, use `$env:EXTRA_PROJECT_DIR = 'C:\path\to\your\dbt_project'`.
-For a one-off override, put `--project-dir PATH` **before** the command:
-`extra --project-dir /path/to/your/dbt_project --dialect snowflake validate`.
-Use an installed `extra` outside this checkout, or invoke its environment explicitly.
-
-dbt SQL and property YAML remain the source of truth. No initialization is
-required. Optional `extra_project.yaml` sits beside `dbt_project.yml` and stores
-tool settings only. This example
-uses Jaffle Shop's DuckDB dialect and gold-model finance view, with explicit
-settings for each workflow:
-
-```yaml
-version: 2
-analysis:
-  dialect: duckdb
-inspection:
-  expand: true
-  optimize: true
-  compile: true
-  boundaries: []
-export:
-  format: xlsx
-  output_dir: extra/review
-  expand: false
-  select:
-    - 'path:models/gld/**'
-  views:
-    finance:
-      select:
-        - 'path:models/gld/**'
-optimization:
-  format: pretty
-  expand: false
-  enrich: false
-metadata:
-  select:
-    - customer_revenue
-```
-
-To preview a starter settings file in **your own project without one**:
-
-```bash
-extra --dialect snowflake init --preview
-```
-
-Remove `--preview` to create it. `init` requires an existing `dbt_project.yml` and
-refuses to overwrite settings; Jaffle Shop already has
-[`extra_project.yaml`](examples/jaffle_shop/extra_project.yaml).
-
-**Project selection:** `--project-dir` > `EXTRA_PROJECT_DIR` > nearest
-`dbt_project.yml` upward from the current directory. Explicit directories must
-contain that file; only automatic discovery searches parents. Settings never
-redirect discovery; legacy `dbt.project_dir` is rejected with migration guidance.
-`init` uses this same root and takes no directory argument.
-
-**Option precedence:** explicit CLI values > settings > discoverable dbt evidence
-> defaults. Explicit selection lists replace configured lists rather than append.
-CLI input paths (`import PATH`, `--manifest PATH`, and project directories) are
-relative to the **current directory**; configured paths and export destinations
-are relative to the **project root**. Absolute paths stay absolute.
-
-No manifest, catalog or warehouse connection is required for the native demo.
-For an existing project, optional `dbt.artifacts.manifest` and
-`dbt.artifacts.catalog` settings add evidence; explicitly configured paths must
-exist. `--manifest PATH` supplies manifest evidence on the CLI. A discovered
-`target/manifest.json` is used when present. Use artifacts for the intended target:
-they do not verify current warehouse state. `analysis.dialect: auto` uses the
-manifest adapter; without a resolved dialect, SQL operations require an explicit
-choice rather than guessing.
-
-See [configuration](docs/reference/configuration.md) and the
-[existing-project guide](docs/guides/existing-dbt-project.md).
-
-## Validate offline
-
-```bash
-extra validate
-```
-
-Validation checks local structure, supported static SQL and dependency cycles.
-Unavailable SQL analysis is reported with a reason; it is not silently counted
-as executed validation. This does **not** run `dbt parse`, `dbt compile`,
-`dbt build`, data tests, warehouse SQL validation, or enforced-contract checks.
-
-## Inspect SQL, columns and logical plans
-
-```bash
-# Full model definition.
-extra inspect customer_revenue
-# Follow two outputs, but stop at the upstream orders model.
-extra inspect customer_revenue --columns customer_id revenue --from orders --compile false
-# Show a logical tree instead of SQL.
-extra inspect customer_revenue --columns revenue --view plan --compile false
-# Keep local relation boundaries and turn logical optimization off.
-extra inspect customer_revenue --expand false --optimize false --compile false
-```
-
-- `--columns` and `--from` accept multiple or repeated values. `--from` boundaries
-  must be upstream models, not arbitrary unrelated resources.
-- Defaults are `--expand true --optimize true --compile true --view sql`.
-  Expansion follows supported upstream model definitions and bounded static local
-  macros. Incremental/history and opaque runtime-dependent logic remain boundaries.
-- `--compile true` resolves physical relation names **offline**, using available
-  source/manifest evidence. It never runs `dbt compile`, reads execution profiles,
-  or verifies that a relation exists. `--compile false` keeps `ref`/`source` calls.
-- A selected output still retains logic affecting its rows and values: joins,
-  predicates, DISTINCT tuples, aggregation, windows and limits. Unknown coverage
-  remains explicit; an unavailable simplification is not a successful rewrite.
-
-All inspection is read-only. The result explains a definition, not stored-table
-equivalence or a warehouse execution plan. See
-[inspection and optimization](docs/guides/inspection-and-optimization.md).
-
-### Simplify the logic for one selected column
-
-`customer_revenue` defines `customer_id`, `revenue` and `order_count`. To focus on
-`revenue`, compare the selected-column explanation before and after simplification.
-Stop at `orders` to keep the comparison short; `--compile false` keeps its `ref`.
-
-**Before: select `revenue`, but leave the explanation unsimplified.**
-
-```bash
-extra inspect customer_revenue --columns revenue --from orders --optimize false --compile false
-```
-
-SQL output (CLI comments omitted):
+**1. `stg_customers.sql`** reads customer records and cleans their names:
 
 ```sql
 SELECT
-  "extra_selected_output"."revenue" AS "revenue"
-FROM (
-  WITH order_totals AS (
-    SELECT
-      customer_id,
-      SUM(amount) AS revenue,
-      COUNT(*) AS order_count
-    FROM {{ ref('orders') }}
-    GROUP BY
-      customer_id
-  )
-  SELECT
+    id AS customer_id,
+    TRIM(first_name) AS first_name,
+    last_name
+FROM {{ source('jaffle_shop', 'customers') }}
+```
+
+**2. `customer_details.sql`** passes the customer attributes through a CTE:
+
+```sql
+WITH customer_input AS (
+    SELECT customer_id, first_name, last_name
+    FROM {{ ref('stg_customers') }}
+)
+SELECT customer_id, first_name, last_name
+FROM customer_input
+```
+
+**3. `customer_profile.sql`** renames the first name:
+
+```sql
+SELECT
     customer_id,
-    revenue + 0 AS revenue,
-    order_count
-  FROM order_totals
-) AS "extra_selected_output";
+    first_name AS customer_name,
+    last_name
+FROM {{ ref('customer_details') }}
 ```
 
-**After: simplify the selected-column explanation (the default).**
+</details>
+
+Existing SQL aliases are preserved. Generated aliases use model/source names
+instead of internal counters; long names use predictable abbreviations and a
+stable fallback. See [alias naming](docs/guides/inspection-and-optimization.md#readable-aliases).
+The path above summarizes lineage; it is not literal CLI output. A current
+manifest may add database qualifiers and quoting to physical relation names.
+
+### Preserve filters and grouping
+
+Inspect an aggregate using the same simple command shape:
 
 ```bash
-extra inspect customer_revenue --columns revenue --from orders --compile false
+uv run extra inspect customer_revenue --columns revenue
 ```
 
-SQL output (CLI comments omitted):
+The completed-order filter, decimal cast and customer grouping still affect
+revenue, so they remain. The unused `order_count` output and redundant CTE and
+selection wrapper are removed.
+
+<details>
+<summary>See the simplified revenue SQL</summary>
+
+SQL output, with CLI comments omitted and without optional dbt artifacts:
 
 ```sql
 SELECT
-  "extra_selected_output"."revenue" AS "revenue"
+  order_totals.revenue + 0 AS "revenue"
 FROM (
-  WITH order_totals AS (
-    SELECT
-      SUM("extra_input_1".amount) AS revenue
-    FROM {{ ref('orders') }} AS "extra_input_1"
-    GROUP BY
-      "extra_input_1".customer_id
-  )
   SELECT
-    order_totals.revenue + 0 AS revenue
-  FROM order_totals AS order_totals
-) AS "extra_selected_output";
+    SUM("orders".amount) AS revenue
+  FROM (
+    SELECT
+      "demo_raw_orders".customer_id AS customer_id,
+      CAST("demo_raw_orders".amount AS DECIMAL(12, 2)) AS amount
+    FROM {{ ref('demo_raw_orders') }} AS "demo_raw_orders"
+    WHERE
+      "demo_raw_orders".status = 'completed'
+  ) AS "orders"
+  GROUP BY
+    "orders".customer_id
+) AS order_totals;
 ```
 
-- **Removed:** the unused `COUNT(*) AS order_count` and unneeded `customer_id`
-  projections.
-- **Preserved:** `SUM(amount)` and `GROUP BY customer_id`, because grouping still
-  determines revenue even when the grouping column is not selected.
-- **Not assumed redundant:** `revenue + 0` remains because removing it requires
-  suitable exact type evidence.
+`revenue + 0` remains because removing it requires exact type evidence. The seed
+reference remains a template when no current manifest resolves its physical name.
 
-This simplifies the explanation only. `inspect` never edits model files; the
-separate `optimize` command previews or applies authored SQL changes.
+</details>
 
-## Review in Excel or CSV, apply through a diff
+Inspection expands and simplifies definitions and resolves available relation
+names by default. It changes no files and executes nothing. Necessary joins,
+evaluation boundaries and row multiplicity are preserved; not every query can
+be flattened. See the [inspection walkthrough](docs/guides/inspection-and-optimization.md)
+for comparisons and the [CLI reference](docs/reference/cli.md#inspect) for options.
+
+## Review and edit in Excel
+
+Export a workbook without changing dbt source files:
 
 ```bash
-extra export --format xlsx --select customer_revenue
-# Edit supported cells in extra/review/review.xlsx, then close Excel.
-extra import extra/review/review.xlsx --preview
-# After reviewing the diff, apply those same edits.
-extra import extra/review/review.xlsx
+uv run extra export --format xlsx --select customer_revenue
 ```
 
-XLSX is the default. The workbook groups native folders into sheets and collapsible
-`TABLE → STEP / OUTPUT → COLUMN` rows. Sources use `SOURCE → TABLE → COLUMN`;
-macros, seeds and snapshots have their own groups. Frozen identity columns,
-filters, a README legend and unlocked cells make supported edits visible.
+Open `extra/review/review.xlsx`. Model sheets follow project folders, with
+**TABLE → STEP / OUTPUT → COLUMN** rows for models, CTEs, final queries and columns.
+Sources use **SOURCE → TABLE → COLUMN** rows; macros, seeds and snapshots have
+their own groups. Supported input cells are unlocked.
 
-| Review area | Supported edits |
+For a first edit, change **Description** on the `customer_revenue` TABLE row to:
+
+```text
+Completed-order revenue per customer, reviewed in Excel.
+```
+
+Save and close Excel, then preview the native YAML change:
+
+```bash
+uv run extra import extra/review/review.xlsx --preview
+```
+
+The proposal changes only the model description in `models/schema.yml`. To accept
+it on your review branch or disposable copy:
+
+```bash
+uv run extra import extra/review/review.xlsx
+git diff -- models/schema.yml
+```
+
+<details>
+<summary>Supported workbook edits, constraints and expanded macro previews</summary>
+
+The workbook also supports:
+
+| Review content | Supported edits |
 | --- | --- |
-| Model and final-output metadata | Descriptions, types, tests, constraints, config, meta and arbitrary authored properties. |
-| STEP / OUTPUT SQL | Supported SELECT clauses, DISTINCT controls and explicit projection expressions at their original scope. |
-| Hidden `Authored SQL` | Full local model SQL/Jinja; use full SQL **or** structured edits for a model, not both. |
-| Macros | Named macro-block SQL plus existing YAML documentation and arguments. |
-| Sources, seeds and snapshots | Supported authored metadata; local SQL snapshots also expose authored SQL. |
-| `Configuration` sheet | Nonempty authored model/seed/snapshot scopes in `dbt_project.yml`, preserving child scopes. |
+| Resource and final-output column metadata | Descriptions, types, tests, constraints, config, meta and other authored properties in existing YAML entries |
+| Model SQL | Supported SELECT clauses and projection expressions, or full SQL through hidden `Authored SQL` cells—not both for the same model |
+| Macros and SQL snapshots | Named macro bodies or supported authored SQL; macro docs and arguments through their properties |
+| `Configuration` sheet | Authored model/seed/snapshot settings at their original package/folder scope in `dbt_project.yml` |
 
-Identity/location columns, CTE column metadata, package/artifact-only resources and
-generated SQL are read-only. Config/Meta/Properties cells use JSON objects;
-Tests/Constraints use JSON arrays. Imports preserve existing `tests` versus
-`data_tests` spelling. No row additions/deletions, renames or path moves are supported.
+References display as shorthand such as `ref.orders` and `macro.round_money('amount')`;
+import restores valid Jinja. Package/artifact-only resources, identities, lineage
+and generated SQL are read-only. Keep hidden IDs and the baseline; do not add or
+delete rows, rename resources or move them. Missing YAML entries are reported,
+not created. Unchanged source files retain their bytes; changed YAML preserves
+comments, quotes and unrelated entries.
 
-### CSV and isolated output directories
-
-```bash
-extra export --format csv --select customer_revenue --output-dir extra/review-csv
-extra import extra/review-csv --preview
-```
-
-CSV exports `resources.csv`, `columns.csv` and `_baseline.json`. Import the
-**whole directory**, not a single CSV. `--output-dir` (alias `--path`) is relative
-to the dbt project unless absolute; separate directories keep reviews isolated.
-Use a spreadsheet's text-import mode for untrusted CSV content rather than
-automatic formula interpretation. XLSX formula cells are rejected on import.
-
-### Macro-aware reviews
-
-Simple calls display as `ref.customer_revenue`, `source.raw.orders` and
-`macro.round_money('amount')`; import restores valid Jinja. Try the bundled macro:
+If affected files change after export, re-export rather than bypassing the conflict.
+For macro-generated column previews, use a separate expanded workbook:
 
 ```bash
-extra export --format xlsx --select macro_revenue --expand --output-dir extra/review-expanded
+uv run extra export --format xlsx --select macro_revenue --expand --output-dir extra/review-expanded
 ```
 
-Export expansion is off by default (`--no-expand`). With `--expand`, supported
-static local macros produce read-only SQL/column previews, including multi-column
-outputs. Known single-column calls can remain COLUMN expressions without
-expansion; unresolved calls remain TEMPLATE rows with reasons. Nested static
-calls and bounded literal-list loops can resolve, but adapter, database and
-environment-dependent macros remain opaque. Edit hidden Authored SQL, macro
-definitions, or re-export without expansion to edit the call itself.
+Generated expressions are read-only; edit authored SQL or the macro definition
+instead. See the [review contract](docs/reference/catalogs.md) for scope restrictions,
+formula rejection and baseline checks.
 
-**Round-trip safeguards:** keep the workbook's hidden identities and baseline
-(or CSV's `_baseline.json`). Edits affecting files changed since export are
-rejected; re-export instead of overwriting concurrent work. YAML comments,
-quotes and unrelated entries are preserved; unchanged files keep their bytes.
-Missing YAML resource entries are reported and skipped, not automatically
-created. See the [round-trip walkthrough](docs/guides/catalog-round-trip.md) and
-[complete review contract](docs/reference/catalogs.md) before applying edits.
+</details>
 
-## Export read-only analysis for an AI assistant
+### Use CSV for flat reviews
 
 ```bash
-extra export --format json --select customer_revenue orders demo_raw_orders --output-dir extra/review-json
+uv run extra export --format csv --select customer_revenue --output-dir extra/review-csv
+# Edit supported fields in resources.csv or columns.csv, retaining _baseline.json.
+uv run extra import extra/review-csv --preview
 ```
 
-`extra/review-json/review.json` contains a versioned envelope
-(`format_version: 1`, `source_of_truth: dbt`), authored SQL/properties, available
-configuration, dependencies, column lineage, query context, coverage counts and
-explicit unknowns/reasons/provenance. JSON is **read-only**, not an import format.
+Import needs the complete directory, including `_baseline.json`. CSV supports
+authored SQL, resource/column metadata and supported simple root projection edits;
+it is not the hierarchical XLSX scope editor. Treat untrusted CSV as text when
+opening it in a spreadsheet to avoid formula interpretation.
 
-Selection does not automatically include upstream definitions; this command
-explicitly includes the revenue chain. Give an external assistant only the
-relevant context and ask for a minimal native SQL/YAML diff with assumptions,
-NULL behavior and test cases. Review it, inspect the result and run your own dbt
-tests. dbt-extra has no built-in LLM client or autonomous agent. Keep sensitive
-data out of external prompts and treat catalog contents as data, not instructions.
-See the [AI-assisted workflow](docs/guides/ai-assisted-workflow.md).
-
-## Preview authored SQL cleanup
+### Export read-only JSON context
 
 ```bash
-extra optimize --select gld_optimizer_constants --preview
-extra optimize --select 'path:models/gld/optimization/**' --preview
-# Compact formatting plus missing-metadata proposals in the same preview.
-extra optimize --select customer_revenue --format compact --enrich true --preview
+uv run extra export --format json --select customer_revenue orders demo_raw_orders --output-dir extra/review-json
 ```
 
-For the constants demo, the SQL expression change is:
+`extra/review-json/review.json` contains authored SQL/properties, available config,
+dependencies, inferred types and best-effort value lineage, plus coverage reasons
+and provenance. The envelope includes `format_version: 1` and `source_of_truth: dbt`.
+Include upstream resources explicitly; selecting a model does not automatically
+export its dependencies. JSON is for analysis/integrations and cannot be imported.
 
-```diff
-   100 / 100 AS currency_scale,
--  1 + 2 AS sample_value
-+  3 AS sample_value;
-```
+## Optimize authored SQL
 
-Division is deliberately retained. `--format pretty` (the default) also lays out
-supported leading Jinja `config()` calls with one argument per line and indented
-collections; `compact` keeps them on one line except authored multiline strings.
-Values, quotes, key order and dynamic expressions are preserved without evaluating
-Jinja. Unsupported config syntax and other Jinja calls are not reformatted.
-
-### Rewrite examples in Jaffle Shop
-
-| Behavior | Model(s) |
-| --- | --- |
-| Complete-schema star expansion / qualification | `gld_optimizer_schema_projection` |
-| Safe constant and Boolean simplification | `gld_optimizer_constants`, `gld_optimizer_projections` |
-| Dead projection/CTE removal, wrapper merging and predicate pushdown | `gld_optimizer_projections` |
-| Guarded predicate pushdown through DISTINCT | `gld_optimizer_predicates` |
-| Bounded Boolean normalization | `gld_optimizer_boolean_normalization` |
-| Guarded inner/cross join simplification | `gld_optimizer_join_simplification` |
-| Deterministic repeated-subquery factoring | `gld_optimizer_shared_subqueries` |
-| Wrapper removal; additional join elimination in expanded inspection only | `gld_optimizer_customer_profile` |
-| Macro-aware pruning of unused columns/aggregates | `gld_customer_lifetime_value`, `gld_customer_leaderboard` |
-| Pruning without changing ranking or DISTINCT keys | `gld_customer_order_ranking`, `gld_distinct_paying_customers` |
-| Complementary UNION ALL scan collapse, preserving duplicates and NULL filtering | `gld_payment_union` |
-| Narrow positive equality-EXISTS to membership rewrite | `gld_high_value_customers` |
-
-These are **14 focused models**, not every possible SQLGlot optimization. The
-[optimizer walkthrough](examples/jaffle_shop/models/gld/optimization/README.md)
-maps the precise rules, evidence and safety boundaries. Keep these teaching inputs
-unchanged: preview here and apply rewrites only on a disposable project copy.
-
-Source optimization preserves output names/order, comments and authored dbt calls
-by default (`--expand false`). Use `extra optimize --select macro_revenue --expand true --preview`
-to review replacing supported static local macros with SQL; omit `--preview` to
-write the expanded, optimized SQL. `ref()`, `source()` and `config()` calls remain
-authored. Unsupported macros skip the model unchanged. Optimization does not eliminate joins.
-Ambiguous schemas, unsafe/opaque expressions and nonconvergent rewrites skip with
-reasons. Reports distinguish structural rewrites, qualification, formatting-only
-changes and unchanged models, and explain retained arithmetic or row boundaries.
-A formatting diff is **not** a structural rewrite; shorter SQL is **not** a measured
-warehouse speedup. See [source optimizer safety](docs/guides/source-optimizer-safety.md).
-
-## Fill missing metadata with real YAML
+Preview changes to the actual model file, not a compiled copy:
 
 ```bash
-extra enrich --select customer_revenue --preview
+uv run extra optimize --select gld_optimizer_constants --preview
 ```
 
-The following excerpts come directly from
-[`models/schema.yml`](examples/jaffle_shop/models/schema.yml) and the enrichment
-proposal for the bundled project. Other models, seeds and unrelated metadata are
-omitted here; this is dbt property YAML, **not** `extra_project.yaml` settings.
+The preview simplifies `1 + 2` to `3`, while preserving division whose type rules
+are not proven.
 
-**Before:**
+<details>
+<summary>See the original and proposed SQL</summary>
+
+For this example, the SQL body starts as:
+
+```sql
+SELECT
+  100 / 100 AS currency_scale,
+  1 + 2 AS sample_value
+```
+
+The proposed SQL body is:
+
+```sql
+SELECT
+  100 / 100 AS currency_scale,
+  3 AS sample_value
+```
+
+The leading `config()` is also formatted, preserving its values. Division stays
+unchanged rather than assuming arithmetic rules across dialects and types.
+Optimization can simplify proven literals/predicates, prune supported projections,
+qualify columns and simplify supported query structure when the required evidence
+is available. Source optimization does not eliminate joins or infer uniqueness
+from documentation.
+
+</details>
+
+<details>
+<summary>Formatting and combined metadata proposals</summary>
+
+Choose pretty or compact SQL/config layout, or include metadata proposals:
+
+```bash
+uv run extra optimize --select customer_revenue --format compact --preview
+uv run extra optimize --select customer_revenue --enrich true --preview
+```
+
+</details>
+
+Reports distinguish structural rewrites, qualification, formatting-only changes,
+unchanged models and skips. Individual rules report applied, blocked or rolled-back
+outcomes. A blocked rule need not prevent unrelated safe work; review retained
+reasons rather than treating a changed-file count as complete optimization.
+
+Remove `--preview` only to apply the reviewed changes. SQL and supported leading
+config layout change in selected authored model files; compiled SQL is never edited.
+See [optimizer safety](docs/guides/source-optimizer-safety.md) and
+[partial optimization](docs/guides/partial-optimization.md) for rule guards,
+schema requirements, rollback and diagnostic fields.
+
+### Expand static local macros and templates
+
+Source optimization preserves macro calls by default. Opt in
+to replacing supported calls with SQL:
+
+```bash
+uv run extra optimize --select macro_revenue --expand true --preview
+```
+
+Before:
+
+```sql
+select customer_id, {{ round_money('revenue') }} as revenue
+from {{ ref('customer_revenue') }}
+```
+
+Proposed source:
+
+```sql
+SELECT
+  a.customer_id,
+  ROUND(a.revenue, 2) AS revenue
+FROM {{ ref('customer_revenue') }} AS a
+```
+
+Bounded static expansion supports local nested calls, multiple-column output,
+literal-list loops, literal `set` statements and statically decidable branches.
+It does not execute arbitrary Jinja, adapters, environment lookups or database
+queries. Runtime-dependent calls remain explicit boundaries; unsupported source
+expansion skips the whole model instead of writing a partial expansion.
+
+`ref()`, `source()` and `config()` stay authored; upstream model definitions are
+not inlined and macro files are unchanged. Top-level static templates remain
+byte-for-byte intact unless source expansion is explicitly enabled. Inspection
+and export expansion only generate read-only explanations/previews.
+
+## Fill missing column metadata
+
+```bash
+uv run extra enrich --select customer_revenue --preview
+```
+
+The bundled example reports **4 missing properties inferred; 2 unresolved**.
+The proposal adds three types and a passthrough description, without inventing
+descriptions for transformed columns.
+
+<details>
+<summary>Compare the original YAML and metadata proposal</summary>
+
+The existing `customer_revenue` YAML entry starts as:
 
 ```yaml
 version: 2
@@ -471,7 +447,7 @@ models:
       - name: order_count
 ```
 
-**After accepting the proposal:**
+The proposal fills three types and the unambiguous passthrough description:
 
 ```yaml
 version: 2
@@ -486,114 +462,210 @@ models:
         data_type: BIGINT
         description: Customer identifier.
       - name: revenue
-        data_type: DECIMAL(12, 2)
+        data_type: DECIMAL(38, 2)
       - name: order_count
         data_type: BIGINT
 ```
 
-The preview reports **4 missing properties inferred; 2 unresolved**: three types
-plus the unambiguous passthrough description of `customer_id`. It does not invent
-descriptions for transformed `revenue` or `order_count`. Existing authored values
-are never overwritten. Apply on your review branch by removing `--preview`.
+</details>
 
-Enrichment can add inferred columns inside an **existing writable model entry**,
-but it does not generate new properties files or missing model entries. Add those
-entries in dbt first and retry; read-only/versioned metadata is skipped with a
-reason. `optimize --enrich true` combines SQL and metadata proposals.
+No descriptions are invented for transformed `revenue` or `order_count`.
+Nonempty authored values are not overwritten. Only local SQL models with existing,
+writable, nonversioned YAML entries are eligible; inferred columns may be added
+inside those entries, but property files/model entries are not created. Existing
+semantic models and metrics are preserved, not inferred.
 
-## SQL dialect and function coverage
+Remove `--preview` to accept the proposal after review. If you applied the earlier
+Excel edit, its reviewed model description stays unchanged. See
+[metadata enrichment](docs/guides/metadata-enrichment.md) for skipped/unresolved
+reasons and inference limits.
 
-dbt-extra uses SQLGlot for SQL parsing and function support, with additional
-implementations for functions SQLGlot does not recognize.
+## Select resources
 
-| dbt adapter | SQL dialect | Additional function support |
-| --- | --- | --- |
-| DuckDB | `duckdb` | SQLGlot only |
-| PostgreSQL | `postgres` | SQLGlot only |
-| Snowflake | `snowflake` | SQLGlot only |
-| BigQuery | `bigquery` | SQLGlot only |
-| Spark / Fabric Spark (`fabricspark`) | `spark` | [86 function gaps implemented](docs/reference/sql-functions/spark.md) |
-| SQL Server (`sqlserver`) | `tsql` | [76 function gaps implemented](docs/reference/sql-functions/tsql.md) |
-| Fabric Warehouse | `fabric` | SQLGlot only |
-| Databricks | `databricks` | SQLGlot only |
-| Redshift | `redshift` | SQLGlot only |
-| Trino | `trino` | SQLGlot only |
-| Athena | `athena` | SQLGlot only |
-
-These dialects have shared SQL regression coverage; warehouse execution checks
-currently cover DuckDB only. Other SQLGlot dialects can be selected explicitly.
-
-Additional function support fills recognition and analysis gaps in SQLGlot
-30.29.0—not missing warehouse functionality. Some return types remain unresolved.
-See the [function reference](docs/reference/sql-functions/README.md) for details.
-
-## Select models, folders and tags
-
-`export`, `optimize` and `enrich` accept repeatable `--select` (`-s`) and
-`--exclude`, each with multiple values:
+Export, optimize and enrich accept repeated `--select/-s` and `--exclude` options:
 
 ```bash
-extra export --select orders customer_revenue --preview
-extra export --select 'path:models/gld/**' --exclude macro_revenue --preview
-extra export --select 'tag:finance' --preview
-extra optimize --select model.jaffle_shop.customer_revenue --preview
-# Use the bundled named view: all gold models, without writing a workbook.
-extra export --view finance --preview
+uv run extra export --select orders customer_revenue --preview
+uv run extra export --select 'path:models/gld/**' --exclude macro_revenue --preview
+uv run extra export --select 'tag:finance' --preview
+uv run extra optimize --select model.jaffle_shop.customer_revenue --preview
 ```
 
-Supported forms are names/globs, exact resource IDs, `name:`, `id:`, `path:`,
-`tag:`, `package:` and `resource_type:`. Quote globs so the shell does not expand
-them. This is a subset of dbt selection: graph operators and intersections are
-not supported. Optimization and enrichment act on SQL models, not source/group
-metadata. A named export view overrides base format/select/exclude/expand
-settings; explicit flags override the view. See the [CLI reference](docs/reference/cli.md).
+Selectors match names, exact IDs or case-sensitive globs with `name:`, `id:`,
+`path:`, `tag:`, `package:` and `resource_type:` prefixes. Multiple inclusions form
+a union, then exclusions are removed. Explicit lists replace configured lists.
+Optimize/enrich consider models only. dbt graph operators and intersections are
+not supported. See [selector syntax](docs/reference/cli.md#select-resources).
 
-## Python API
+## Validate a project
+
+```bash
+uv run extra validate
+```
+
+Validation checks resource discovery, local SQL-file Jinja structure, supported
+static model SQL and reference cycles without changing files. Unavailable SQL
+analysis is reported with reasons. This does not run dbt parsing, compilation,
+builds, data tests or enforced-contract checks.
+
+## Configure an existing project
+
+With an installed CLI, run inside the directory containing `dbt_project.yml`:
+
+```bash
+cd path/to/your/dbt_project
+extra --dialect snowflake inspect your_model --columns your_column
+extra --dialect snowflake optimize --select your_model --preview
+extra --dialect snowflake init --preview
+```
+
+Use your actual SQL dialect. From outside the project, put `--project-dir PATH`
+before the command, or set `EXTRA_PROJECT_DIR`. Optional `extra_project.yaml`
+settings live beside `dbt_project.yml`; SQL and business metadata stay in dbt files.
+Project selection is explicit directory, then `EXTRA_PROJECT_DIR`, then
+`DBT_PROJECT_DIR`, then the nearest ancestor containing `dbt_project.yml`.
+Explicit directories must contain that file and do not fall back to another root.
+
+`init` requires an existing dbt project. Remove `--preview` to create settings;
+it refuses to overwrite an existing file and never creates a second model tree.
+For the bundled DuckDB project, settings can include:
+
+```yaml
+version: 2
+analysis:
+  dialect: duckdb
+inspection:
+  expand: true
+  optimize: true
+  compile: true
+  boundaries: []
+export:
+  output_dir: extra/review
+  format: xlsx
+  expand: false
+  select:
+    - 'path:models/gld/**'
+  views:
+    finance:
+      select:
+        - 'tag:finance'
+optimization:
+  format: pretty
+  expand: false
+  enrich: false
+metadata:
+  select:
+    - customer_revenue
+```
+
+Preview the named view with `uv run extra export --view finance --preview`.
+Views override base export settings; explicit flags override the view. Use your
+project's dialect and selectors rather than copying the demo's assumptions.
+
+Authored SQL/YAML are authoritative. A discoverable `target/manifest.json` supplies
+optional identity/config/relation evidence; `--manifest PATH` chooses an explicit
+existing manifest. Optional catalog evidence must be configured under
+`dbt.artifacts.catalog`; it is not automatically loaded from `target/catalog.json`.
+Artifacts do not replace authored SQL or verify warehouse state.
+
+Global options go before the command. Relative project/manifest/import paths use
+the current directory; configured paths and export destinations use the project
+root. CLI values override settings, including replacing selection lists.
+
+See the [existing-project guide](docs/guides/existing-dbt-project.md),
+[configuration reference](docs/reference/configuration.md) and
+[CLI options and selectors](docs/reference/cli.md).
+The same CLI is available as `python -m dbt_extra`; use `extra --help`,
+`extra COMMAND --help` and `extra --version` for discovery.
+
+## Use the Python API
+
+From `examples/jaffle_shop`, analyze resources, inspect selected columns and combine
+SQL/metadata proposals without writing files:
 
 ```python
 from dbt_extra import Project
 from dbt_extra.analysis import catalog
+from dbt_extra.enrichment import enrich
+from dbt_extra.inspection import inspect, plan
 from dbt_extra.optimization import optimize
+from dbt_extra.sql.renderer import render
 
-project = Project()  # Same root discovery as the CLI; or Project("/path/to/project").
+project = Project()  # Or Project("/path/to/project", dialect="duckdb").
 document = catalog(project, project.select(["customer_revenue"]))
+tree, parsed, issues = inspect(
+    project, "customer_revenue", ["revenue"],
+    boundaries=("orders",), compiled=False,
+)
+explanation = render(tree, parsed, project.dialect)
+logical_plan = plan(tree, parsed, project.dialect)
+
 changes, skipped = optimize(project, select=["customer_revenue"])
+changes, report = enrich(project, select=["customer_revenue"], changes=changes)
 print(changes.diffs())
+changes.apply(preview=True)  # Check inputs; write nothing.
 # changes.apply()  # Explicitly accept the proposed source edits.
 ```
 
-The CLI is the preferred entry point; Python integrations should pin and test
-versions. See [architecture](docs/development/architecture.md) for module boundaries.
+`ChangeSet.changed()` exposes proposed bytes and `diffs()` exposes unified text
+diffs. Inspect `skipped`, `issues`, enrichment `report` and
+`changes.optimization_report` for coverage and rule outcomes. Create a fresh
+`Project` after changing files; applying checks inputs against the loaded snapshot.
+Workflow functions use Python defaults rather than automatically merging CLI
+workflow settings; use `project.options(...)` to resolve configured options.
 
-## Safety and maturity
+For SQL without a dbt project:
 
-extra is pre-1.0 and conservative by design:
+```python
+from dbt_extra.sql.rewrites.engine import optimize_source
 
-- **Unknowns stay explicit.** Coverage depends on dialect, schemas and Jinja.
-  Bounded static local macros can be previewed; runtime/adapter-dependent macros
-  remain opaque. Only explicit `optimize --expand true` (or `optimization.expand: true`)
-  replaces supported authored macro calls with generated SQL.
-- **dbt still owns execution.** dbt-extra is not a dbt engine, metrics service or
-  warehouse optimizer. Inspection explains definitions, not equivalence to
-  persisted or incremental relations. Run your own dbt parsing, tests and builds.
-- **Writes still need review.** Package/artifact-only resources and inherited
-  version properties are read-only. Full opaque-template edits are structure-checked,
-  not dbt-compiled. Baseline checks and rollback attempts are not crash-safe
-  multi-file transactions or file locks.
+outcomes = []
+sql = optimize_source("SELECT 1 + 2 AS k", "duckdb", outcomes=outcomes)
+assert "3 AS k" in sql
+```
 
-See [compatibility](docs/compatibility.md) and the
-[production adoption checklist](docs/guides/production-workflow.md).
+`optimize_source` returns SQL without filesystem writes. An optional schema must
+describe complete, ordered relation columns—not a partial documentation list.
+The [Python API reference](docs/reference/python-api.md) also covers single-resource
+analysis, validation, review export/import, errors and change application.
 
-## Help shape dbt-extra
+## Coverage and limitations
 
-Try one model from your own project. If analysis stops, share a **minimal redacted
-reproduction** and the coverage reason in an
-[issue](https://github.com/billybillysss/dbt-extra/issues). Dialect edge cases,
-documentation improvements and regression tests are especially useful.
-Read [Contributing](CONTRIBUTING.md) to get started; report vulnerabilities through
-the [security policy](SECURITY.md), not a public bug report.
+Analysis depends on the dialect, schema evidence and templates. Supported static
+local macros can be analyzed without running Jinja; runtime-dependent logic stays
+an explicit boundary. Inferred types and value lineage are best-effort.
+The [SQL function reference](docs/reference/sql-functions/README.md) distinguishes
+recognition, type inference and rewrite safety across eleven dialect catalogs.
+The shared offline regression matrix covers DuckDB, PostgreSQL, Snowflake,
+BigQuery, Spark, T-SQL, Fabric, Databricks, Redshift, Trino and Athena. Accepted
+dialect names are SQLGlot names; cross-dialect parsing/rendering is not warehouse
+execution certification or proof that every function can be inferred or rewritten.
 
-[Get started](docs/getting-started.md) · [CLI](docs/reference/cli.md) ·
-[Configuration](docs/reference/configuration.md) · [Review contract](docs/reference/catalogs.md) ·
-[Inspection and optimization](docs/guides/inspection-and-optimization.md) ·
-[Native example](examples/jaffle_shop/README.md) · [Contributing](CONTRIBUTING.md)
+Discovery follows configured dbt model/macro/seed/snapshot roots. SQL models have
+the richest analysis; Python models and YAML-defined resources still expose
+available metadata. Sources, seeds, snapshots, macro definitions/docs and
+package/artifact resources remain visible with explicit analysis status/reasons.
+
+Inspection explains definitions, not stored or incremental data. A logical plan
+is not a warehouse execution plan, and an SQL rewrite is not a measured speedup.
+Run dbt parsing, tests and builds independently. Writes have conflict checks and
+rollback attempts, not crash-safe multi-file transactions or file locks.
+Skipped models, unavailable analysis and unresolved properties can still return
+exit code 0; inspect coverage as well as command success. Shared catalogs can
+contain sensitive SQL/metadata; redact them and treat their contents as untrusted
+data. dbt-extra includes no LLM client or autonomous agent.
+
+See [compatibility](docs/compatibility.md),
+[optimizer safety](docs/guides/source-optimizer-safety.md) and the
+[production checklist](docs/guides/production-workflow.md) before adoption.
+
+## Documentation and support
+
+- [Documentation index](docs/index.md)
+- [Native Jaffle Shop example](examples/jaffle_shop/README.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [License](LICENSE)
+
+For bugs, open an [issue](https://github.com/billybillysss/dbt-extra/issues) with a
+minimal redacted reproduction and the coverage reason. Report vulnerabilities
+through the [security policy](SECURITY.md), not a public issue.

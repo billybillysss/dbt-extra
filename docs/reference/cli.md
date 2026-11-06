@@ -1,126 +1,200 @@
 # CLI reference
 
 ```text
-extra [--version] [--project-dir PATH] [--dialect DIALECT] [--manifest PATH] COMMAND
+extra [OPTIONS] COMMAND [COMMAND_OPTIONS]
 ```
 
-Project selection is **`--project-dir` > `EXTRA_PROJECT_DIR` > nearest
-`dbt_project.yml` upward from the current directory**. Explicit directories must
-contain `dbt_project.yml`; optional `extra_project.yaml` is loaded only beside it.
-Global options go before the command. dbt-extra never runs dbt or connects to a warehouse.
+`python -m dbt_extra` runs the same CLI. Use `extra --help` or
+`extra COMMAND --help` for command help. Help and `extra --version` need no project.
+dbt-extra never runs dbt or connects to a warehouse.
 
-CLI input paths (`--project-dir`, `--manifest`, `import PATH`) and relative
-`EXTRA_PROJECT_DIR` values are relative to the current directory. Configured paths
-and export `--output-dir` / `--path` are relative to the project root; absolute
-paths stay absolute. See [configuration](configuration.md#relative-paths).
+## Global options
 
-## Commands
+Global options go **before** the command.
 
-| Command | Purpose | Writes by default |
+| Option | Meaning |
+| --- | --- |
+| `--project-dir PATH` | Directory containing `dbt_project.yml` |
+| `--dialect DIALECT` | SQLGlot dialect name; overrides settings and manifest adapter |
+| `--manifest PATH` | Existing manifest file, relative to the current directory |
+| `--version` | Print the installed version and exit |
+| `--help` | Show help and exit |
+
+Project selection is `--project-dir` > `EXTRA_PROJECT_DIR` > `DBT_PROJECT_DIR` >
+nearest `dbt_project.yml` upward from the current directory. Explicit directories
+must contain that file; they do not search parents or fall back to another root.
+Optional `extra_project.yaml` is loaded beside it.
+
+Input paths and relative project environment variables use the current directory.
+Configured paths and export destinations use the project root. Absolute paths
+stay absolute. See [configuration](configuration.md#relative-paths).
+
+## Shared command options
+
+| Option | Commands | Behavior |
 | --- | --- | --- |
-| `init` | Add optional version-2 settings at the selected dbt root | New settings only; refuses overwrite |
-| `validate` | Check resource structure, Jinja structure, static SQL and reference cycles | No |
-| `inspect MODEL` | Explain full/selected-column definition SQL or logical plan | No |
-| `export` | Produce XLSX, CSV, or read-only JSON | Review outputs only; no pruning |
-| `import PATH` | Apply supported review edits with baseline checks | Original dbt files |
-| `optimize` | Conservative authored SQL rewriting | Selected `.sql` files |
-| `enrich` | Fill missing types/passthrough descriptions | dbt property YAML |
+| `--preview` | `init`, `export`, `import`, `optimize`, `enrich` | Show outputs or source diffs; create no files, directories or temporary files |
+| `--dialect DIALECT` | All except `init` | Override the global dialect for this command |
+| `--select/-s VALUE...` | `export`, `optimize`, `enrich` | Repeatable inclusion list |
+| `--exclude VALUE...` | `export`, `optimize`, `enrich` | Repeatable exclusion list |
+| `--help` | All | Show command help |
 
-Every writing command accepts `--preview`: show intended
-outputs or source diffs without creating directories, temporary files or outputs.
-
-`init` uses the same discovery as every other command. Run `extra init --preview`
-inside a project, or `extra --project-dir PATH init --preview` from outside it.
-There is no positional directory argument.
+Omitted options use settings, then defaults. Explicit selection lists replace
+configured lists rather than append to them.
 
 ## Select resources
 
-`export`, `optimize`, and `enrich` support repeated `--select/-s` and `--exclude`,
-each accepting multiple values. Explicit lists replace, rather than append to,
-configuration. Omitted lists leave configuration unchanged.
-
 ```bash
-extra export --format xlsx --select orders customers
-extra export --select 'path:models/gld/**' --exclude macro_revenue
-extra export --select 'tag:finance' --view finance
+extra export --select orders customers --preview
+extra export --select 'path:models/gld/**' --exclude macro_revenue --preview
+extra export --select 'tag:finance' --preview
 extra optimize --select model.jaffle_shop.customer_revenue --preview
 ```
 
-Supported selector forms: name/glob, exact resource ID, `name:`, `id:`, `path:`,
-`tag:`, `package:`, `resource_type:`. These are dbt-extra's documented subset, not the
-complete dbt selector language; graph operators and intersections are unsupported.
-Optimization and enrichment operate on SQL models, not source/group metadata.
+| Form | Matches |
+| --- | --- |
+| `orders`, `gld_*` | Resource name or exact resource ID |
+| `name:PATTERN` | Name |
+| `id:PATTERN` | Resource ID |
+| `path:PATTERN` | Project-relative source file path, including filename |
+| `tag:PATTERN` | Resource tags |
+| `package:PATTERN` | Owning dbt project/package |
+| `resource_type:PATTERN` | Resource kind, such as `model`, `source`, `seed`, `snapshot`, `macro`, `macro_definition` or `source_group` |
+
+Patterns are case-sensitive globs; quote them to prevent shell expansion. Multiple
+inclusions are a union, then exclusions are removed. Without a selection,
+commands consider all eligible resources. A nonempty selection matching nothing
+is an error. `optimize` and `enrich` consider models only.
+
+This is a subset of dbt selection: graph operators and intersections are not
+supported. Selection does not automatically include upstream definitions in an
+export. Use explicit resource IDs to distinguish same-named resources.
+
+## Init
+
+```bash
+extra --dialect snowflake init --preview
+```
+
+Requires an existing `dbt_project.yml`. Remove `--preview` to create
+`extra_project.yaml`; existing settings are never overwritten. There is no
+positional directory argument. From outside the project, use
+`extra --project-dir PATH --dialect snowflake init --preview`.
+
+## Validate
+
+```bash
+extra validate
+```
+
+Checks resource discovery, local SQL-file Jinja structure, supported static model
+SQL and reference cycles. SQL analysis that is unavailable is printed with a
+reason. No selection option is provided: validation considers the loaded project.
+This does not run `dbt parse`, `dbt compile`, `dbt build`, data tests, warehouse SQL
+validation or enforced-contract checks.
 
 ## Inspect
 
 ```bash
-extra inspect customer_revenue
-extra inspect customer_revenue --columns revenue customer_id
-extra inspect customer_revenue --columns revenue --from orders --view plan
-extra inspect customer_revenue --optimize false --expand false
-extra inspect customer_revenue --compile false
+extra inspect customer_revenue --columns revenue --from orders --compile false
+extra inspect customer_revenue --columns revenue --view plan --compile false
 ```
 
-`--columns` and `--from` accept multiple/repeated values. Boundaries must be
-upstream models. Defaults are full model, upstream/static-local-macro expansion, optimized logical
-SQL, physical relation names (`--compile true`), and `--view sql`.
-`--compile false` retains dbt relation templates. Compilation resolves literal
-source names or applicable manifest relation evidence; unresolved names remain
-templates with a coverage warning. It never runs `dbt compile`, evaluates profiles,
-or verifies warehouse existence. Use a current manifest for the intended target.
-`--view plan` is a logical tree, not a warehouse plan.
-`--dialect` can be supplied globally or on SQL-related commands.
+`MODEL` is a model name or exact resource ID.
 
-## Export and import
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--columns NAME...` | All outputs | Repeated or multiple selected outputs |
+| `--from MODEL...` | No explicit boundaries | Repeated or multiple upstream models to retain as inputs; overrides `inspection.boundaries` |
+| `--expand true\|false` | `true` | Expand supported upstream models and static local macros |
+| `--optimize true\|false` | `true` | Simplify the logical explanation |
+| `--compile true\|false` | `true` | Resolve available physical relation names offline |
+| `--view sql\|plan` | `sql` | Render SQL or a logical tree |
+
+Inspection is read-only. Selected columns retain row-affecting joins, filters,
+grouping and multiplicity. `--compile false` retains dbt relation templates;
+true uses literal source declarations or applicable manifest evidence. Unresolved
+names remain templates with warnings. It never evaluates profiles or verifies
+warehouse existence. The plan is not a warehouse execution plan.
+
+See the [inspection guide](../guides/inspection-and-optimization.md) for SQL
+comparisons and the [partial optimization guide](../guides/partial-optimization.md)
+for transformation outcomes and static-template boundaries.
+
+## Export
 
 ```bash
-extra export --format xlsx --output-dir extra/review
-extra export --format xlsx --expand
-extra export --format csv --preview
-extra export --format json --select customer_revenue
+extra export --format xlsx --select customer_revenue
+extra export --format csv --output-dir extra/review-csv --preview
+extra export --format json --select customer_revenue orders demo_raw_orders
+extra export --view finance --preview
+```
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--format xlsx\|csv\|json` | `xlsx` | Review format; JSON is read-only |
+| `--output-dir PATH`, `--path PATH` | `extra/review` | Destination relative to the project root |
+| `--view NAME` | `export.default_view`, if set | Named `export.views` override |
+| `--expand`, `--no-expand` | Off | Static local macro previews; generated SQL is read-only |
+
+Export writes review outputs only. It may replace the same output filenames but
+never prunes unrelated files. Use separate directories for independent reviews.
+A view overrides base format/select/exclude/expand settings; explicit flags
+override the view. See [review tables and JSON](catalogs.md).
+
+## Import
+
+```bash
 extra import extra/review/review.xlsx --preview
-extra import extra/review/review.xlsx
-extra import extra/review --preview
+extra import extra/review-csv --preview
 ```
 
-`--output-dir` (`--path` alias), `--format xlsx|csv|json`, and `--view NAME`
-override export settings. `--expand` / `--no-expand` controls static local macro
-previews (off by default). Bounded literal expressions, nested local calls, and
-literal-list loops are supported; adapter/database/environment-dependent output
-remains unknown. Resolved SQL produces column mappings without extra TEMPLATE rows;
-unresolved calls remain TEMPLATE rows with reasons. Generated expressions are read-only;
-edit hidden Authored SQL or macro definitions, or re-export without expansion to edit calls.
-XLSX is the default. CSV import requires the complete
-export directory, including `_baseline.json`. JSON is read-only, not an import
-format. See the [review contract](catalogs.md).
+`PATH` is an existing XLSX workbook or complete CSV export directory, including
+`_baseline.json`. It is relative to the current directory, not the project root.
+JSON cannot be imported. Supported edits patch original dbt files; remove
+`--preview` only after reviewing the diff. Keep hidden identities and baselines,
+close Excel, and re-export after stale-source conflicts. See the
+[round-trip walkthrough](../guides/catalog-round-trip.md) and
+[import rules](catalogs.md#import-rules).
 
-## Optimize and enrich
+## Optimize
 
 ```bash
-extra optimize --select customer_revenue --format pretty --preview
-extra optimize --select customer_revenue --format compact --enrich true
+extra optimize --select customer_revenue --format compact --enrich true --preview
 extra optimize --select macro_revenue --expand true --preview
+```
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--format pretty\|compact` | `pretty` | SQL and supported leading Jinja `config()` layout |
+| `--expand true\|false` | `false` | Replace supported static local macros/templates with SQL |
+| `--enrich true\|false` | `false` | Include missing-metadata proposals for the same selection |
+
+Unlike export's paired flags, inspect/optimize Boolean options require a value.
+Optimization edits selected authored model SQL, never compiled SQL or upstream
+definitions. Expansion preserves `ref()`, `source()` and `config()`; it does not
+edit macro definition files. Unsupported expansion skips the model unchanged.
+
+Reports separate structural rewrites, qualification, formatting-only changes,
+unchanged models and skips. Applied/blocked/rolled-back rule outcomes and retained
+boundaries explain partial work. A blocked rule can leave unrelated safe work
+intact. See [optimizer safety](../guides/source-optimizer-safety.md).
+
+## Enrich
+
+```bash
 extra enrich --select customer_revenue --preview
 ```
 
-`pretty` also formats leading Jinja `config()` calls with one argument per line
-and indented dictionaries/lists. `compact` keeps these calls on one line (except
-authored multiline strings). Quotes, values, key order, and dynamic expressions
-are preserved without evaluating Jinja; other Jinja calls are not reformatted.
-Unsupported config syntax is preserved unchanged.
+Fills missing inferred types and unambiguous passthrough descriptions in existing
+writable dbt model entries. Reports inferred and unresolved properties; authored
+values are not overwritten. See [metadata enrichment](../guides/metadata-enrichment.md).
 
-`--expand true|false` controls macro writeback (default: false). False preserves
-authored macro calls. True replaces statically resolvable local macros, including
-nested calls, literal-list loops, multiple-column output and SQL clauses, with SQL
-before optimization. Applying writes that SQL to the original model; `--preview`
-only shows the proposed diff. `ref()`, `source()` and `config()` remain authored;
-upstream model SQL is not inlined. Unsupported/runtime-dependent macros skip the
-whole model unchanged with a reason. Macro definition files are not edited.
-Optimization never requires compiled SQL. Enrichment reports inferred and
-unresolved properties and never overwrites existing authored values.
-See [SQL functions](sql-functions/README.md) for implemented Spark/T-SQL gaps and verified examples
-and the distinction between parsing, type inference and safe rewriting.
+## Exit status and automation
 
-Offline `validate` is not `dbt parse`, `dbt compile`, `dbt build`, warehouse SQL
-validation, or an enforced-contract check. Unsupported analysis is explicitly
-reported rather than counted as executed dbt validation.
+Successful commands, including previews, return 0. Skipped models, unavailable
+analysis and unresolved metadata can still return 0: inspect the coverage/report,
+not just the exit status. Reported project, conflict and file errors return 1;
+invalid CLI usage returns 2. Human-readable output is not a stable machine
+protocol; use version-tested [Python integrations](python-api.md) or read-only
+JSON where appropriate.

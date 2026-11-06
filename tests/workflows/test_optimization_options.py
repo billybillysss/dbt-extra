@@ -6,7 +6,8 @@ from dbt_extra.config import validate_settings
 from dbt_extra.errors import SpecError
 from dbt_extra.files.yaml import load_yaml
 from dbt_extra.optimization import optimize
-from dbt_extra.sql.macros import macro_calls, parse_model
+from dbt_extra.project.model_sql import parse_model
+from dbt_extra.sql.templates.macros import macro_calls
 from tests.helpers import invoke, project, put, snapshot
 
 
@@ -92,7 +93,6 @@ def test_expansion_config_and_cli_precedence(native, macro_model, flags, expande
     ("", "{{ missing('o.amount') }}", "no local static definition"),
     ("{% macro bad(v) %}{{ env_var('VALUE') }}{% endmacro %}", "{{ bad('o.amount') }}", "remains opaque"),
     ("{% macro bad(v) %}{{ bad(v) }}{% endmacro %}", "{{ bad('o.amount') }}", "Recursive macro expansion"),
-    ("{% macro bad(v) %}random(){% endmacro %}", "{{ bad('o.amount') }}", "Volatile or unknown"),
     ("{% macro bad(v) %}{{ v }}{% endmacro %}", "{{- bad('o.amount') }}", "Whitespace-controlled"),
 ])
 def test_unsafe_expansion_skips_without_partial_write(native, macro_model, definition, call, reason):
@@ -107,6 +107,25 @@ def test_unsafe_expansion_skips_without_partial_write(native, macro_model, defin
     assert snapshot(native) == before
     changes.apply()
     assert macro_model.read_bytes() == before["models/expanded.sql"]
+
+
+@pytest.mark.parametrize("expand", [False, True])
+@pytest.mark.parametrize("body", ["random()", "unknown_udf(o.amount)"])
+def test_macro_function_effects_preserved_beside_safe_work(native, macro_model, expand, body):
+    put(native, "macros/opaque.sql", "{% macro opaque() %}" + body + "{% endmacro %}")
+    macro_model.write_text("SELECT 1+2 AS k, {{ opaque() }} AS opaque FROM {{ ref('orders') }} o", encoding="utf-8")
+    before = snapshot(native)
+    p = project(native)
+    changes, skipped = optimize(p, select=["expanded"], expand=expand)
+    assert not skipped
+    candidate = changes.after[macro_model].decode()
+    assert "3 AS k" in candidate
+    if not expand:
+        assert "{{ opaque() }}" in candidate
+    expected = parse_model(p, macro_model.read_text(encoding="utf-8"), expand=True).tree.selects[1].unalias()
+    actual = parse_model(p, candidate, expand=True).tree.selects[1].unalias()
+    assert actual == expected
+    assert snapshot(native) == before
 
 
 def test_expansion_settings_validation():

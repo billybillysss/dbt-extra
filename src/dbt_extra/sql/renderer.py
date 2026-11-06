@@ -6,7 +6,8 @@ from sqlglot import exp
 from sqlglot.errors import ErrorLevel, SqlglotError
 
 from dbt_extra.errors import SpecError
-from dbt_extra.sql.config_format import format_configs
+from dbt_extra.sql.templates.config_format import format_configs
+from dbt_extra.sql.aliases import available_alias
 
 
 def sql(node, dialect, *, pretty=False):
@@ -19,14 +20,14 @@ def sql(node, dialect, *, pretty=False):
 def reference_aliases(tree, refs):
     """Keep internal mask identifiers out of rewritten authored aliases."""
     occupied = {i.name.casefold() for i in tree.find_all(exp.Identifier)}
-    for index, token in enumerate(refs, 1):
+    for token, ref in sorted(refs.items(), key=lambda item: (item[1].kind, item[1].args, str(item[1].version))):
         uses = [i for i in tree.find_all(exp.Identifier) if i.name.casefold() == token.casefold()
                  and not (isinstance(i.parent, exp.Table) and i.arg_key == "this")]
         if not uses:
             continue
-        alias = f"extra_input_{index}"
-        while alias in occupied:
-            alias += "_"
+        name = ref.args[-1] if ref.args else "stored_self"
+        context = ref.args[0] if len(ref.args) > 1 else None
+        alias = available_alias(name, occupied, context=context)
         occupied.add(alias)
         for table in tree.find_all(exp.Table):
             if table.name == token and not table.args.get("alias"):
@@ -34,9 +35,19 @@ def reference_aliases(tree, refs):
         for identifier in uses:
             identifier.set("this", alias)
             identifier.set("quoted", True)
+        if len(name) > 30:
+            for subquery in tree.find_all(exp.Subquery):
+                if subquery.alias == alias:
+                    comment = f" Expanded from: {name} "
+                    if comment not in (subquery.comments or []):
+                        subquery.add_comments([comment])
 
 
-def render(tree, parsed, dialect, *, pretty=True, prefix=False, format_config=False):
+def render(tree, parsed, dialect, *, pretty=True, prefix=False, format_config=False, terminate=True):
+    if parsed.template_source is not None:
+        if tree != parsed.tree:
+            raise SpecError("Authored top-level template structure cannot be reconstructed after SQL edits")
+        return parsed.template_source
     tree = tree.copy()
     reference_aliases(tree, parsed.refs)
     # Restore templates only in table positions, never aliases or literals.
@@ -76,4 +87,6 @@ def render(tree, parsed, dialect, *, pretty=True, prefix=False, format_config=Fa
     if format_config and prefix and header:
         header = format_configs(header, pretty=pretty)
     header = header + "\n\n" if prefix and header else ""
-    return header + rendered.rstrip(";") + ";\n"
+    # dbt embeds model SQL inside materialization queries. A statement terminator
+    # is valid for standalone inspection, but not inside those wrappers.
+    return header + rendered + (";\n" if terminate else "\n")

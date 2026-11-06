@@ -163,6 +163,36 @@ status/reasons/provenance. Unknown schema, opaque Jinja and partial value lineag
 remain explicit. JSON is analysis context, not an editable import format or a
 substitute for join/filter context when explaining business behavior.
 
+Resource coverage uses these statuses:
+
+| Status | Meaning |
+| --- | --- |
+| `metadata_only` | Declared or artifact metadata without analyzed SQL |
+| `parsed` | SQL parsed for supported analysis; not a guarantee of complete lineage |
+| `partial` | Some SQL analyzed, with unresolved shape, qualification or template boundaries |
+| `unavailable` | SQL analysis unavailable; `reason` explains why |
+| `source_only` | Editable macro source, not an expanded model query |
+
+Column statuses are `declared`, `parsed` or `resolved`. `resolved` means value
+origins were found, not that the whole query's semantics or warehouse types were
+verified. Retain reasons and provenance alongside inferred values.
+
 JSON catalogs and review baselines have no branded `format` field. Baselines
 retain format version 1, original rows and file hashes for conflict checks.
 Older version-2 reviews must be re-exported; do not edit their baseline to upgrade.
+
+### Sharing and integrations
+
+Share only relevant resources and retain the envelope (`format_version`,
+`source_of_truth`, `dialect`) and coverage status/reasons. Selection does not
+automatically include upstream definitions; include needed dependencies explicitly.
+Pin tool versions and compatibility-test JSON consumers rather than assuming a
+stable agent protocol. Proposals belong in native dbt SQL/properties, not the JSON.
+Use the [review gate](../guides/production-workflow.md#review-gate) before acceptance.
+
+Keep credentials, production data and sensitive metadata out of shared catalogs.
+Treat descriptions, comments, SQL and macro bodies as untrusted data, not
+instructions that authorize tool use, writes or execution. These precautions also
+apply when an external AI assistant consumes the context. dbt-extra includes no
+LLM client or autonomous agent; validation does not grant a consumer blanket write
+permission or verify its proposed business rules.

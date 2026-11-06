@@ -12,9 +12,10 @@ from dbt_extra.inspection import inspect
 from dbt_extra.optimization import optimize
 from dbt_extra.project import Project
 from dbt_extra.sql import parse_authored, render
-from dbt_extra.sql.jinja import validate_template
-from dbt_extra.sql.macros import macro_calls, parse_model
-from dbt_extra.sql.references import resolve_ref
+from dbt_extra.sql.templates.syntax import validate_template
+from dbt_extra.project.model_sql import parse_model
+from dbt_extra.sql.templates.macros import macro_calls
+from dbt_extra.project.references import resolve_ref
 from tests.helpers import invoke, optimizer_inputs, snapshot
 
 
@@ -43,12 +44,13 @@ def test_source_examples_really_rewrite_and_preserve_interfaces(demo, source_cha
     assert not skipped
     assert len(changes.optimization_report) == len(NAMES) == 14
     for name in NAMES:
-        model = demo.find(name)
+        model = demo.find_model(name)
         if model.id in skipped:
             assert model.path not in changes.after
             continue
         candidate = changes.after[model.path].decode("utf-8")
-        assert changes.optimization_report[model.id]["status"] == "rewritten", name
+        expected_status = "formatted" if name in {"gld_customer_leaderboard", "gld_high_value_customers"} else "rewritten"
+        assert changes.optimization_report[model.id]["status"] == expected_status, name
         before = parse_model(demo, model.code, expand=True)
         after = parse_model(demo, candidate, expand=True)
         assert validate_template(before.prefix) == validate_template(after.prefix)
@@ -71,16 +73,17 @@ def test_source_examples_really_rewrite_and_preserve_interfaces(demo, source_cha
             assert next(after.tree.find_all(exp.Table)).alias == "a"
             assert all(isinstance(p, exp.Column) for p in after.tree.selects)
         elif name in {"gld_customer_lifetime_value", "gld_customer_leaderboard"}:
-            assert changes.optimization_report[model.id]["status"] == "rewritten"
             assert "unused_status" not in candidate
-            assert "largest_order" not in candidate
-            assert "returned_order_count" not in candidate
             expected = parse_model(demo, model.code).tree.copy()
             for query in expected.find_all(exp.Select):
                 query.set("expressions", [p for p in query.selects if p.output_name not in {
-                    "unused_status", "largest_order", "returned_order_count"}])
+                    "unused_status"}])
             assert parse_model(demo, candidate).tree == expected
             if name == "gld_customer_leaderboard":
+                # SUM/MAX without type/effect evidence must not disappear merely
+                # because their outputs are unused.
+                assert "largest_order" in candidate
+                assert "returned_order_count" in candidate
                 assert any(s.args.get("distinct") for s in after.tree.find_all(exp.Select))
                 assert list(after.tree.find_all(exp.Having))
                 assert list(after.tree.find_all(exp.Window))
@@ -114,8 +117,8 @@ def test_source_examples_really_rewrite_and_preserve_interfaces(demo, source_cha
             assert len(list(after.tree.find_all(exp.Table))) == 1
             assert isinstance(after.tree.args["where"].this, exp.Or)
         elif name == "gld_high_value_customers":
-            assert not list(after.tree.find_all(exp.Exists))
-            assert len(list(after.tree.find_all(exp.In))) == 1
+            # Project evidence proves names, not exact stored key types.
+            assert after.tree.find(exp.Exists) and not after.tree.find(exp.In)
             assert len(list(after.tree.find_all(exp.Avg))) == 2
 
 
@@ -153,14 +156,18 @@ def test_focused_inspection_shapes(demo, case):
     parse_authored(render(tree, parsed, "duckdb"), "duckdb")
 
 
-def test_selected_profile_needs_expansion_to_prove_join_elimination(demo):
+def test_selected_profile_retains_unproven_join_evaluation(demo):
     name = "gld_optimizer_customer_profile"
     full, _, _ = inspect(demo, name, ["first_name"], optimized=False, compiled=False)
     tree, parsed, issues = inspect(demo, name, ["first_name"], compiled=False)
     assert list(full.find_all(exp.Join))
     assert not any("unavailable" in issue["reason"].lower() for issue in issues)
-    assert not list(tree.find_all(exp.Join))
-    assert len(list(tree.find_all(exp.Select))) == 1
+    assert list(tree.find_all(exp.Join))
+    assert any(i["rule"] == "join_elimination" and i["status"] == "blocked"
+               and i["reason_code"] == "rhs_uniqueness_unproven"
+               for i in issues)
+    assert sum(len(s.selects) for s in tree.find_all(exp.Select)) < sum(
+        len(s.selects) for s in full.find_all(exp.Select))
     code = render(tree, parsed, "duckdb")
     assert "{{ source('jaffle_shop', 'customers') }}" in code
     assert "TRIM(" in code
@@ -230,7 +237,7 @@ def warehouse(demo, request):
 
 @pytest.mark.parametrize("name", NAMES)
 def test_authored_demo_rewrites_preserve_results(demo, source_changes, warehouse, name):
-    model = demo.find(name)
+    model = demo.find_model(name)
     before = parse_model(demo, model.code, expand=True)
     changes, skipped = source_changes
     if model.id in skipped:
@@ -243,7 +250,7 @@ def test_authored_demo_rewrites_preserve_results(demo, source_changes, warehouse
 @pytest.mark.parametrize("name", NAMES)
 @pytest.mark.parametrize("expanded", [False, True], ids=["isolated", "expanded"])
 def test_inspected_demo_rewrites_preserve_results(demo, warehouse, name, expanded):
-    before = parse_model(demo, demo.find(name).code, expand=True)
+    before = parse_model(demo, demo.find_model(name).code, expand=True)
     tree, parsed, issues = inspect(demo, name, expanded=expanded, compiled=False)
     assert not any("Simplification unavailable" in issue["reason"] for issue in issues)
     assert warehouse(before.tree, before, name in ORDERED) == warehouse(tree, parsed, name in ORDERED)
@@ -251,7 +258,7 @@ def test_inspected_demo_rewrites_preserve_results(demo, warehouse, name, expande
 
 def test_selected_profile_preserves_customer_multiplicity(demo, warehouse):
     name = "gld_optimizer_customer_profile"
-    before = parse_model(demo, demo.find(name).code, expand=True)
+    before = parse_model(demo, demo.find_model(name).code, expand=True)
     names, types, full = warehouse(before.tree, before)
     expected = Counter()
     index = names.index("first_name")
@@ -266,7 +273,7 @@ def test_selected_profile_preserves_customer_multiplicity(demo, warehouse):
     ("gld_customer_leaderboard", "ranked_revenue"),
 ])
 def test_macro_models_have_structural_selected_output_inspection(demo, warehouse, name, column):
-    before = parse_model(demo, demo.find(name).code, expand=True)
+    before = parse_model(demo, demo.find_model(name).code, expand=True)
     names, types, rows = warehouse(before.tree, before)
     expected = Counter()
     index = names.index(column)
@@ -276,12 +283,13 @@ def test_macro_models_have_structural_selected_output_inspection(demo, warehouse
     complete, _, _ = inspect(demo, name, [column], optimized=False, compiled=False)
     tree, parsed, issues = inspect(demo, name, [column], compiled=False)
     assert not any("unavailable" in issue["reason"].lower() for issue in issues)
-    assert len(list(tree.find_all(exp.Select))) < len(list(complete.find_all(exp.Select)))
+    assert sum(len(s.selects) for s in tree.find_all(exp.Select)) < sum(
+        len(s.selects) for s in complete.find_all(exp.Select))
     code = render(tree, parsed, "duckdb")
     assert "unused_status" not in code
-    assert "largest_order" not in code
-    assert "returned_order_count" not in code
     if name == "gld_customer_leaderboard":
+        assert "largest_order" in code
+        assert "returned_order_count" in code
         assert list(tree.find_all(exp.Window))
         assert any(select.args.get("distinct") for select in tree.find_all(exp.Select))
         assert list(tree.find_all(exp.Having))
@@ -290,7 +298,7 @@ def test_macro_models_have_structural_selected_output_inspection(demo, warehouse
 
 
 def test_leaderboard_ties_and_final_limit_are_exercised(demo, warehouse):
-    parsed = parse_model(demo, demo.find("gld_customer_leaderboard").code, expand=True)
+    parsed = parse_model(demo, demo.find_model("gld_customer_leaderboard").code, expand=True)
     names, _, rows = warehouse(parsed.tree, parsed, ordered=True)
     if rows:  # The same test also runs on the empty-input fixture.
         assert len(rows) == 2

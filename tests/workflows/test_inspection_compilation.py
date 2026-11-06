@@ -6,6 +6,7 @@ import json
 import duckdb
 import pytest
 from sqlglot import exp, parse_one
+from sqlglot.optimizer.scope import Scope, traverse_scope
 
 from dbt_extra.errors import SpecError
 from dbt_extra.inspection import inspect, plan
@@ -17,6 +18,12 @@ def source_yaml(native, settings="schema: main_raw", table_settings="identifier:
     put(native, "models/schema.yml", "version: 2\nsources:\n  - name: raw\n    "
         + settings.replace("\n", "\n    ") + "\n    tables:\n      - name: orders\n        "
         + table_settings.replace("\n", "\n        ") + "\n")
+
+
+def physical_tables(tree):
+    # Safe partial optimization may retain CTE names as well as physical inputs.
+    return [table for scope in traverse_scope(tree) for table in scope.tables
+            if not isinstance(scope.sources.get(table.alias_or_name), Scope)]
 
 
 def manifest(native, *, source=None, models=None):
@@ -38,7 +45,7 @@ def test_literal_source_compiles_actual_schema_and_identifier(native, dialect):
     p.dialect = dialect
     before = snapshot(native)
     tree, parsed, issues = inspect(p, "revenue", ["revenue"])
-    table, = tree.find_all(exp.Table)
+    table, = physical_tables(tree)
     assert (table.catalog, table.db, table.name) == ("", "main_raw", "raw_orders")
     code = render(tree, parsed, dialect)
     assert "{{" not in code and "extra_ref_" not in code
@@ -147,7 +154,7 @@ def test_unexpanded_model_uses_resolved_manifest_not_custom_schema(native, optio
     put(native, "dbt_project.yml", "name: shop\nmodels:\n  shop:\n    +schema: custom\n")
     manifest(native, models={"orders": fields})
     tree, parsed, _ = inspect(project(native), "revenue", **options)
-    table, = tree.find_all(exp.Table)
+    table, = physical_tables(tree)
     assert (table.catalog, table.db, table.name) == ("warehouse", "target_custom", "actual_orders")
     assert "{{ ref(" not in render(tree, parsed, "duckdb")
 
@@ -179,7 +186,7 @@ def test_this_uses_owning_model_even_in_expanded_upstream(native):
     manifest(native, models={"orders": {"relation_name": '"history"."stored_orders"'},
                              "revenue": {"relation_name": '"analytics"."stored_revenue"'}})
     tree, parsed, _ = inspect(project(native), "revenue")
-    table, = tree.find_all(exp.Table)
+    table, = physical_tables(tree)
     assert (table.db, table.name) == ("history", "stored_orders")
     assert "{{ this }}" not in render(tree, parsed, "duckdb")
 

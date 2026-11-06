@@ -9,7 +9,7 @@ from dbt_extra.files.paths import within
 from dbt_extra.files.yaml import load_yaml
 from dbt_extra.project.properties import inherited_config, validate_properties
 from dbt_extra.project.resources import Resource
-from dbt_extra.sql.jinja import validate_template
+from dbt_extra.sql.templates.syntax import validate_template
 
 
 def discover(project):

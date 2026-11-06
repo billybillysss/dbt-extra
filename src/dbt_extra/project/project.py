@@ -68,7 +68,7 @@ class Project:
     def select(self, selections=None, exclude=None, *, kinds=None):
         return select(self.resources.values(), selections, exclude, kinds=kinds)
 
-    def find(self, name):
+    def find_model(self, name):
         if name in self.resources:
             resource = self.resources[name]
             if resource.kind != "model":

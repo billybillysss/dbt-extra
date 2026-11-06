@@ -1,0 +1,13 @@
+version: 2
+sources:
+  - name: shop
+    schema: raw
+    tables:
+      - name: customers
+        columns:
+          - name: id
+          - name: first_name
+          - name: last_name
+      - name: orders
+        columns:
+          - name: user_id

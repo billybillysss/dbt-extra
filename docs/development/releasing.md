@@ -1,6 +1,6 @@
 # Release checklist
 
-dbt-extra `0.2.0` is the version documented by this checkout.
+dbt-extra `0.2.1` is the version documented by this checkout.
 The [release workflow](https://github.com/billybillysss/dbt-extra/blob/HEAD/.github/workflows/release.yml)
 runs on `v*` tags or manual dispatch. It runs CI, builds distributions, checks
 package metadata and publishes to PyPI using OIDC trusted publishing.
@@ -54,7 +54,7 @@ tests alone do not establish installability.
    in PyPI unless you also add a matching protected environment to the publish job.
    Only the publish job requests `id-token: write`; no PyPI API token is needed.
 4. Run CI and distribution checks, inspect the artifacts locally, then push the
-   approved `v<version>` tag (for example, `v0.2.0`). The workflow rejects tags
+   approved `v<version>` tag (for example, `v0.2.1`). The workflow rejects tags
    that do not match the installed `dbt-extra` version. Manual dispatch also
    publishes, but skips the tag check when run against a branch; choose the
    intended revision carefully. Do not rerun publication for an existing PyPI version.

@@ -9,8 +9,8 @@ from dbt_extra.files.yaml import fields, mapping
 
 
 def resolve_project(project_dir=None):
-    """Select one dbt root: explicit directory, environment, then nearest ancestor."""
-    value = project_dir if project_dir is not None else os.environ.get("EXTRA_PROJECT_DIR")
+    """Select one dbt root: explicit directory, EXTRA/DBT environment, then ancestor."""
+    value = project_dir if project_dir is not None else os.environ.get("EXTRA_PROJECT_DIR", os.environ.get("DBT_PROJECT_DIR"))
     if value is not None:
         root = Path(value).absolute()
     else:
@@ -19,7 +19,7 @@ def resolve_project(project_dir=None):
     project_file = root / "dbt_project.yml"
     safe_path(project_file)
     if not project_file.is_file():
-        raise SpecError(f"No dbt_project.yml found in {root}; --project-dir or EXTRA_PROJECT_DIR must name a dbt project root")
+        raise SpecError(f"No dbt_project.yml found in {root}; --project-dir, EXTRA_PROJECT_DIR or DBT_PROJECT_DIR must name a dbt project root")
     return root.resolve()
 
 
@@ -42,7 +42,7 @@ def validate_settings(settings):
         raise SpecError("extra_project.yaml must use version: 2 tool configuration; models are dbt files")
     if "project_dir" in mapping(settings.get("dbt", {}), "dbt"):
         raise SpecError("dbt.project_dir is no longer supported; move extra_project.yaml beside dbt_project.yml, "
-                        "remove dbt.project_dir, and select that root with --project-dir or EXTRA_PROJECT_DIR")
+                        "remove dbt.project_dir, and select that root with --project-dir, EXTRA_PROJECT_DIR or DBT_PROJECT_DIR")
     for key, keys in allowed.items():
         fields(mapping(settings.get(key, {}), key), keys, set(), key)
     for section, options in settings.items():

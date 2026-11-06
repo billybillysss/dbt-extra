@@ -1,6 +1,5 @@
 """Extra inspection rules must preserve bags, barriers, and dbt boundaries."""
 
-from collections import Counter
 from itertools import product
 
 import duckdb
@@ -9,9 +8,10 @@ from sqlglot import exp, parse_one
 
 from dbt_extra.inspection import inspect, plan
 from dbt_extra.sql import parse_authored, render
-from dbt_extra.sql.inspection_rules import (deduplicate_subqueries, normalize_predicates,
+from dbt_extra.sql.rewrites.structural import (deduplicate_subqueries, normalize_predicates,
                                        optimize_safe_joins, pushdown_safe_predicates)
 from tests.helpers import SQL_DIALECTS, project, put, snapshot
+from tests.semantics import assert_equivalent
 
 
 CASES = {
@@ -71,7 +71,6 @@ def target(native, case):
 def test_extra_inspection_rules_preserve_results(native, case, empty, columns):
     p = target(native, case)
     before = snapshot(native)
-    original, original_parsed, _ = inspect(p, "target", optimized=False)
     optimized, parsed, issues = inspect(p, "target", columns)
     assert not any("Simplification unavailable" in issue["reason"] for issue in issues)
     with duckdb.connect() as con:
@@ -79,29 +78,15 @@ def test_extra_inspection_rules_preserve_results(native, case, empty, columns):
         if not empty:
             con.execute("insert into raw.orders values (1, 10), (2, 20), (2, 20), (2, 40), (3, NULL), (NULL, 30)")
 
-        def result(tree, parsed):
-            try:
-                return Counter(con.execute(render(tree, parsed, "duckdb")).fetchall())
-            except duckdb.Error as exc:
-                return type(exc)
-
-        expected = result(original, original_parsed)
-        if case == "scalar_many" and not empty:
-            assert expected is duckdb.InvalidInputException
-        else:
-            assert isinstance(expected, Counter), expected
-        if columns and isinstance(expected, Counter):
-            index = [projection.output_name for projection in original.selects].index("id")
-            projected = Counter()
-            for row, count in expected.items():
-                projected[(row[index],)] += count
-            expected = projected
-        elif columns:
-            # The warehouse can itself prune an unselected scalar expression.
-            baseline, baseline_parsed, _ = inspect(p, "target", columns, optimized=False)
-            expected = result(baseline, baseline_parsed)
-            assert isinstance(expected, Counter)
-        assert result(optimized, parsed) == expected
+        # The oracle is authored SQL, not another trip through inspect(). A real
+        # projection also permits the engine to prune an unselected scalar error.
+        original = CASES[case].replace("INPUT", "raw.orders")
+        if columns:
+            original = f"SELECT id FROM ({original}) AS expected"
+        expected_error = None
+        if case == "scalar_many" and not empty and not columns:
+            expected_error = (duckdb.InvalidInputException, "More than one row returned by a subquery")
+        assert_equivalent(con, original, render(optimized, parsed, "duckdb"), expected_error=expected_error)
     assert snapshot(native) == before
 
 

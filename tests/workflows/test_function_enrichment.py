@@ -36,7 +36,7 @@ def test_documented_function_enrichment(native, dialect, expression, expected):
         "SELECT " + expression + " AS result FROM {{ ref('orders') }}")
     yaml = put(native, "models/function_example.yml", "version: 2\nmodels:\n  - name: function_example\n")
     project = Project(native, dialect=dialect)
-    analysis = analyze(project, project.find("function_example"))
+    analysis = analyze(project, project.find_model("function_example"))
     assert analysis["reason"] is None, analysis
     column = next(item for item in analysis["columns"] if item["name"] == "result")
     assert column.get("inferred_type") == expected
@@ -52,7 +52,7 @@ def test_documented_function_enrichment(native, dialect, expression, expected):
         assert set(changes.changed()) == {yaml}
         assert any(item.get("value") == expected for item in report if item["property"] == "data_type")
         changes.apply()
-        props = Project(native, dialect=dialect).find("function_example").columns["result"]
+        props = Project(native, dialect=dialect).find_model("function_example").columns["result"]
         assert props["data_type"] == expected
         assert not props.get("description")
         after = snapshot(native)
@@ -60,9 +60,16 @@ def test_documented_function_enrichment(native, dialect, expression, expected):
         assert {path for path in before if before[path] != after[path]} == {"models/function_example.yml"}
 
 
-@pytest.mark.parametrize("dialect", ["spark", "tsql"])
-def test_function_enrichment_preserves_authored_metadata(native, dialect):
-    put(native, "models/function_example.sql", "SELECT ABS(id) AS result FROM {{ ref('orders') }}")
+@pytest.mark.parametrize("dialect,expression", [
+    ("spark", "ABS(id)"), ("tsql", "ABS(id)"),
+    ("fabric", "isjson('{}')"), ("databricks", "isnull(id)"),
+    ("duckdb", "pg_typeof(id)"), ("postgres", "pg_backend_pid()"),
+    ("snowflake", "last_query_id()"), ("bigquery", "error('stop')"),
+    ("redshift", "fnv_hash('abc')"), ("trino", "bar(0.5, 10)"),
+    ("athena", "invoker_principal()"),
+])
+def test_function_enrichment_preserves_authored_metadata(native, dialect, expression):
+    put(native, "models/function_example.sql", "SELECT " + expression + " AS result FROM {{ ref('orders') }}")
     put(native, "models/function_example.yml", """version: 2
 models:
   - name: function_example
@@ -83,7 +90,7 @@ def test_native_function_metadata_keeps_authored_names_and_lineage(native, diale
         "SELECT id AS order_id, ABS(id) AS magnitude FROM {{ ref('orders') }}")
     put(native, "models/function_example.yml", "version: 2\nmodels:\n  - name: function_example\n")
     project = Project(native, dialect=dialect)
-    analysis = analyze(project, project.find("function_example"))
+    analysis = analyze(project, project.find_model("function_example"))
     assert analysis["reason"] is None, analysis
     assert [c["name"] for c in analysis["columns"]] == ["order_id", "magnitude"]
     expected_type = exp.DataType.build("BIGINT").sql(dialect=dialect)
@@ -96,7 +103,7 @@ def test_native_function_metadata_keeps_authored_names_and_lineage(native, diale
     assert {(r["column"], r["property"]) for r in report if "value" in r} == {
         ("order_id", "data_type"), ("order_id", "description"), ("magnitude", "data_type")}
     changes.apply()
-    columns = Project(native, dialect=dialect).find("function_example").columns
+    columns = Project(native, dialect=dialect).find_model("function_example").columns
     assert list(columns) == ["order_id", "magnitude"]
     assert columns["order_id"]["description"] == "Order identifier"
     assert not columns["magnitude"].get("description")
@@ -108,10 +115,10 @@ def test_snowflake_identifier_normalization_does_not_duplicate_yaml(native, alia
     put(native, "models/function_example.yml",
         "version: 2\nmodels:\n  - name: function_example\n    columns:\n      - name: " + yaml_name + "\n")
     project = Project(native, dialect="snowflake")
-    assert analyze(project, project.find("function_example"))["reason"] is None
+    assert analyze(project, project.find_model("function_example"))["reason"] is None
     changes, _ = enrich(project, select=["function_example"])
     changes.apply()
-    columns = Project(native, dialect="snowflake").find("function_example").columns
+    columns = Project(native, dialect="snowflake").find_model("function_example").columns
     assert list(columns) == [yaml_name]
     assert columns[yaml_name]["data_type"] == "BIGINT"
     assert columns[yaml_name]["description"] == "Order identifier"

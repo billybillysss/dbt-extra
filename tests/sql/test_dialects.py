@@ -5,7 +5,7 @@ from sqlglot import exp
 from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
 
 from dbt_extra.errors import SpecError
-from dbt_extra.optimization import optimize_source
+from dbt_extra.sql.rewrites.engine import optimize_source
 from dbt_extra.sql.dialects import resolve_dialect, validate_dialect
 from dbt_extra.sql.parser import parse_authored
 

@@ -4,7 +4,7 @@ import pytest
 
 from dbt_extra import SpecError
 from dbt_extra.analysis.dependencies import validate_cycles
-from dbt_extra.analysis.models import coverage
+from dbt_extra.analysis.results import coverage
 
 
 def test_diamond_graph_and_external_boundaries_are_not_cycles():

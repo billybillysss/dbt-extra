@@ -14,7 +14,7 @@ uv sync --locked
 uv run extra --version
 ```
 
-This is the private `0.2.0` preview; cloning requires repository access.
+This is the private `0.2.1` preview; cloning requires repository access.
 The executable is `extra`; Python imports use `dbt_extra`.
 See [compatibility](compatibility.md) for supported versions and limitations.
 
@@ -23,13 +23,13 @@ with Python 3.11+, then run `python -m pip install .`. Replace `uv run extra`
 with `extra` in the commands below. dbt execution is optional and requires your own
 dbt/adapter installation; `uv sync --locked` includes the demo's development dependencies.
 
-## Inspect your first column
+## See where a column comes from
 
 Enter the dbt project once; uv finds the checkout's environment from here:
 
 ```bash
 cd examples/jaffle_shop
-uv run extra inspect customer_revenue --columns revenue --compile false
+uv run extra inspect customer_revenue --columns revenue
 ```
 
 The SQL explains `customer_revenue → orders → demo_raw_orders`. Look for:
@@ -39,21 +39,42 @@ The SQL explains `customer_revenue → orders → demo_raw_orders`. Look for:
 - `SUM` and `GROUP BY customer_id`: selecting one output does not discard its grain.
 - A seed-input boundary: dbt-extra explains definitions, not seed execution or stored data.
 
-`revenue + 0` is retained; a decimal expression cannot be assumed type-equivalent
-to the same expression without addition. Unknowns and conservative skips are
-information to review, not permission to guess.
+SQL output (CLI comments omitted):
+
+```sql
+SELECT
+  order_totals.revenue + 0 AS "revenue"
+FROM (
+  SELECT
+    SUM("orders".amount) AS revenue
+  FROM (
+    SELECT
+      "demo_raw_orders".customer_id AS customer_id,
+      CAST("demo_raw_orders".amount AS DECIMAL(12, 2)) AS amount
+    FROM {{ ref('demo_raw_orders') }} AS "demo_raw_orders"
+    WHERE
+      "demo_raw_orders".status = 'completed'
+  ) AS "orders"
+  GROUP BY
+    "orders".customer_id
+) AS order_totals;
+```
+
+`revenue + 0` remains because removing addition can change a decimal expression's
+type. See the [selected-column comparison](guides/inspection-and-optimization.md#simplify-the-logic-for-one-selected-column)
+for an explanation before and after simplification.
 
 Compare a bounded explanation and a logical plan:
 
 ```bash
-uv run extra inspect customer_revenue --columns revenue --from orders --compile false
-uv run extra inspect customer_revenue --columns revenue --view plan --compile false
+uv run extra inspect customer_revenue --columns revenue --from orders
+uv run extra inspect customer_revenue --columns revenue --view plan
 ```
 
 With `--from orders`, inspection stops at `orders`; its internal filter is no
 longer expanded. None of these commands changes source files or executes SQL.
-`--compile false` keeps dbt relation templates visible; the default resolves
-available physical relation names offline, not through `dbt compile`.
+The default resolves available physical relation names offline, not through
+`dbt compile`. Without a current manifest, the seed reference remains a template.
 
 ## Review a model in Excel
 
@@ -82,7 +103,7 @@ artifacts supply evidence, never source rewriting input. Without SQL evidence,
 metadata still exports with explicit analysis-availability reasons.
 Alternatively, from this checkout, run
 `uv run extra --project-dir /path/to/project --dialect duckdb validate`.
-Project selection is `--project-dir` > `EXTRA_PROJECT_DIR` > nearest
+Project selection is `--project-dir` > `EXTRA_PROJECT_DIR` > `DBT_PROJECT_DIR` > nearest
 `dbt_project.yml` upward. Optional settings live beside that file; explicit
 directories do not search parents. Setting the environment does not change the
 current directory: CLI input paths remain relative to it, while export destinations

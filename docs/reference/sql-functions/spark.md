@@ -1,4 +1,6 @@
-# Spark function gaps
+# Spark SQL functions
+
+## dbt-extra local function gaps
 
 These 86 entries fill SQLGlot 30.29.0 recognition/semantic gaps, not native
 function coverage. Source: [Spark 3.5.7 built-ins](https://spark.apache.org/docs/3.5.7/sql-ref-functions-builtin.html).
@@ -8,7 +10,10 @@ Later Spark features are not implied. See [contracts and enrichment examples](RE
 `aggregate` means one value per group. `generator` marks output-expansion/session
 semantics; no generator output schema is fed into YAML inference.
 Unresolved types need input/schema/configuration evidence or a future type rule.
-All entries remain error/evaluation rewrite barriers. `stable` depends on query,
+All entries retain movement/duplication barriers. Unused `isnull`/`isnotnull`
+outputs may be pruned only when their arguments are independently safe; fallible
+arguments and comments are retained. This grants no general function movement.
+`stable` depends on query,
 session or engine context; `volatile` may vary per evaluation; `unknown` is not
 assumed deterministic. No nullability, precision or runtime success is certified.
 
@@ -104,3 +109,13 @@ Implementation and executable argument examples:
 | `user` | scalar | `STRING` | stable |
 | `version` | scalar | `STRING` | stable |
 | `inline_outer` | generator | unresolved / input-dependent | immutable |
+
+<!-- BEGIN GENERATED FUNCTION INVENTORY -->
+## Function implementation reference
+
+All function names and implementation symbols are in the single
+[function implementation matrix](README.md#function-implementation-matrix).
+
+Source scope: Apache Spark 3.5.7 built-ins.
+See the [official-source snapshot](function_sources.json) for all source URLs (collected 2026-11-05).
+<!-- END GENERATED FUNCTION INVENTORY -->

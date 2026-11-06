@@ -4,7 +4,7 @@ Sources: Microsoft Learn T-SQL functions (SQL Server 2025 / ver17). Availability
 varies by server/version. These signatures are not execution certification.
 """
 
-from dbt_extra.sql.functions import Function as F
+from dbt_extra.sql.functions.models import FunctionSpec as F
 
 
 FUNCTIONS = (

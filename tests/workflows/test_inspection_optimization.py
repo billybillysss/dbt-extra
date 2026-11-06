@@ -45,23 +45,23 @@ left join customer_orders as o on c.id = o.customer_id
 
 
 @pytest.mark.parametrize("dialect", SQL_DIALECTS)
-def test_selected_customer_inspection_removes_unused_joins(customer_project, dialect):
+def test_selected_customer_inspection_retains_fallible_evaluation(customer_project, dialect):
     p = project(customer_project)
     p.dialect = dialect
     before = snapshot(customer_project)
     tree, parsed, issues = inspect(p, "gld_customers", ["first_name"], compiled=False)
     code = render(tree, parsed, dialect)
     assert not any("Simplification unavailable" in issue["reason"] for issue in issues)
-    assert not list(tree.find_all(exp.Join))
-    assert not list(tree.find_all(exp.Subquery))
-    assert not list(tree.find_all(exp.CTE))
-    assert len(list(tree.find_all(exp.Select))) == 1
+    # CAST and SUM are not proven total for unknown warehouse types. Unused
+    # projected outputs alone do not authorize erasing their evaluation.
+    assert list(tree.find_all(exp.Join))
+    assert any(i.get("rule") == "join_elimination" and i["status"] == "blocked" for i in issues)
     assert [p.output_name for p in tree.selects] == ["first_name"]
     assert "TRIM(" in code
     assert "{{ source('raw', 'customers') }}" in code
     assert "{{ ref(" not in code
-    assert "{{ source('raw', 'orders') }}" not in code
-    assert "{{ source('raw', 'payments') }}" not in code
+    assert "{{ source('raw', 'orders') }}" in code
+    assert "{{ source('raw', 'payments') }}" in code
     parse_authored(code, dialect)
     assert snapshot(customer_project) == before
 
@@ -73,8 +73,7 @@ def test_inspect_cli_defaults_expand_and_optimize(customer_project, flags):
     assert result.exit_code == 0, result.output
     assert "raw.customers" in result.output
     assert "TRIM(" in result.output
-    assert "JOIN" not in result.output
-    assert "extra_selected_output" not in result.output
+    assert "LEFT JOIN" in result.output
     assert "{{ ref(" not in result.output
     assert snapshot(customer_project) == before
 
@@ -83,7 +82,7 @@ def test_inspect_cli_can_disable_optimization_and_expansion(customer_project):
     unoptimized = invoke(customer_project, "inspect", "gld_customers", "--columns", "first_name", "--optimize", "false", "--compile", "false")
     assert unoptimized.exit_code == 0, unoptimized.output
     assert unoptimized.output.upper().count("LEFT JOIN") == 2
-    assert "extra_selected_output" in unoptimized.output
+    assert ') AS "customers";' in unoptimized.output
     assert "{{ source('raw', 'payments') }}" in unoptimized.output
     unexpanded = invoke(customer_project, "inspect", "gld_customers", "--columns", "first_name", "--expand", "false", "--compile", "false")
     assert unexpanded.exit_code == 0, unexpanded.output

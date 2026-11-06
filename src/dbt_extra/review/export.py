@@ -6,7 +6,7 @@ from dbt_extra.files.changes import ChangeSet, content, digest
 from dbt_extra.files.paths import safe_path
 from dbt_extra.review import csv, json
 from dbt_extra.review.contract import HEADERS, json_text
-from dbt_extra.review.workbook import workbook_for
+from dbt_extra.review.xlsx.writer import write_workbook
 
 
 def tables_for(document):
@@ -59,7 +59,7 @@ def export_review(project, *, format="xlsx", output_dir=None, select=None, exclu
     if format == "json":
         outputs = json.outputs(document)
     elif format == "xlsx":
-        outputs = {"review.xlsx": workbook_for(project, document, tables, baseline, expand=expand)}
+        outputs = {"review.xlsx": write_workbook(project, tables, baseline, expand=expand)}
     else:
         outputs = csv.outputs(tables, baseline)
     # Generated exports are deliberately not pruned and cannot touch authored files.

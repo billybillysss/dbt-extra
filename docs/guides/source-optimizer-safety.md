@@ -9,7 +9,7 @@ avoids guessing which joined relation owns an unqualified column.
 
 ## Schema evidence
 
-`optimize_source(code, dialect, *, schema=None, pretty=True)` accepts complete,
+`optimize_source(code, dialect, *, schema=None, pretty=True, outcomes=None)` accepts complete,
 ordered relation schemas as dictionaries or native SQLGlot schemas. Dictionary
 column identifiers retain their authored case and quoting through star expansion.
 Supplying a schema asserts completeness; a partial list of documentation columns
@@ -25,11 +25,12 @@ YAML properties and manifest/catalog column documentation are **not exhaustive
 schema evidence**. Catalogs are not trusted for source star expansion without a
 verifiable freshness contract. No warehouse, adapter, dbt, Fabric, or environment
 access is performed. Unknown joined schemas cannot establish the absence of a
-column; ambiguous unqualified columns and unknown-schema USING/NATURAL joins skip.
+column; ambiguous unqualified columns and unknown-schema USING/NATURAL joins
+disable binding-dependent transformations, not safe local literal work.
 
 Projection stars require complete ordered schemas. Supported EXCLUDE/EXCEPT and
 REPLACE forms are qualified and expanded. Star RENAME, ILIKE, other unsupported
-modifiers, and duplicate outputs skip rather than silently change the interface.
+modifiers, and duplicate outputs retain their interface rather than guessing bindings.
 `COUNT(*)` is an aggregate, not a projection star requiring expansion.
 
 ## Rewrite boundaries
@@ -41,23 +42,22 @@ guarded positive WHERE EXISTS / complementary UNION ALL normalization
 → qualify / expand stars
 → scope-aware dead projection pruning
 → local type-guarded expression simplification
-→ guarded projection pushdown
-→ eligible predicate pushdown
-→ eligible subquery merging
-→ eliminate unused CTEs
-→ guarded Boolean normalization / DISTINCT predicate pushdown / inner-join simplification
+→ scope-local guarded Boolean normalization / predicate pushdown
+→ eligible subquery merging / inner-join simplification
 → guarded deterministic shared-subquery factoring
+→ eligible unused-CTE cleanup
 → requalify / validate
 → generated alias naming / redundant alias cleanup
 → render / reparse / revalidate
 ```
 
-Eligibility for expression movement is intentionally query-wide and conservative. Aggregates
+Eligibility for expression movement is conservative and specific to a candidate region. Aggregates
 (including empty-input global aggregates), outer joins, windows, positional
 ordering, DISTINCT, limits/offsets, set operations, HAVING, QUALIFY, and correlation
-restrict expression movement. Independent rules have their own guards: ordinary
-DISTINCT can admit predicate pushdown without changing its tuple, and identical
-grouped derived tables can be factored without flattening aggregation. Boolean
+restrict movement across those boundaries. A rejected parent region does not
+prevent safe work in an independent child/sibling region. Independent rules have
+their own guards; identical grouped derived tables can be factored without
+flattening aggregation. Boolean
 normalization is bounded; OR join predicates are not split into separate joins.
 Shared CTE consumers and native scope dependencies
 are retained. Source optimization does not eliminate joins or infer uniqueness.
@@ -90,7 +90,12 @@ Only a positive conjunctive WHERE `EXISTS(SELECT 1 FROM one_table WHERE
 inner.key = outer.key AND inner_only_filters)` is decorrelated to membership.
 All columns must be explicitly qualified. It does not apply to SELECT truth
 values, NOT, OR, multiple correlation keys, aggregates, limits, joins, or nested
-subqueries. Other correlated shapes still skip. Duplicates cannot multiply the
+subqueries. Both keys must be base-table columns with the same explicitly declared
+TINYINT, SMALLINT, INT or BIGINT type, currently only in DuckDB and Spark. Unknown,
+mixed, string, decimal and derived-column types retain EXISTS: equality and IN
+can have different coercion/binding rules. Project interface evidence proves names,
+not physical key types, so it does not authorize this rewrite. Other correlated
+shapes retain their boundaries. Duplicates cannot multiply the
 outer rows, and SQL FALSE/UNKNOWN both reject rows in this WHERE context.
 
 Complementary UNION ALL scans collapse only when both plain branches have
@@ -108,15 +113,23 @@ relabeled or passed through general structural rules, avoiding synthetic labels
 that would change database results.
 
 The optimizer requires a fixed point within four passes, rejecting cycles or
-nonconvergence. SQLGlot qualification/rule errors, including `KeyError`, become
-chained, actionable per-model skips. Unrelated programming errors are not blanket
-caught. Skipped models have no proposed SQL write; other selected models continue.
+nonconvergence. Each eligible rule starts from a copy of the last validated state.
+SQLGlot errors and explicit validation rejections roll back only that candidate;
+qualified rules rebuild bindings after changes. Failed qualification disables
+binding-dependent work. Unexpected programming exceptions are not recoverable
+rule failures. The SQLGlot-integration `KeyError` wrapper produces a
+chained actionable model error; unrelated parser/programming errors propagate.
+Final comments, output interfaces, dbt calls and parse/render checks still apply.
+These are structural checks, **not runtime-equivalence validation**: they do not
+prove result rows, exact database types, error behavior or evaluation counts.
+Optimized project models omit statement terminators so dbt can embed them in
+materialization queries; standalone SQL output retains its terminator.
 
 ## Macros, preview, and conflicts
 
 By default (`--expand false`), supported scalar macros are inspected through bounded static expansion. A separate,
 narrow pruning rule uses expanded, qualified dependencies to remove dead authored
-columns and grouped aggregates, including identifiers hidden in macro string
+columns and proven-safe grouped aggregate outputs, including identifiers hidden in macro string
 arguments. This pruning rule deletes projections only; a separate local expression
 pass can simplify independent SQL constants and Boolean identities. Neither rule
 moves, expands, duplicates, or removes an authored macro call, nor simplifies an
@@ -124,8 +137,10 @@ expression containing a macro placeholder. Scope/projection mapping for pruning
 must remain one-to-one.
 DISTINCT tuples, global aggregate cardinality, positional and ALL dependencies,
 shared consumers, window dependencies, HAVING, filters, and limits are retained.
-For example, the leaderboard can drop unused `largest_order` and
-`returned_order_count` aggregates without changing its ranking or final limit.
+Potentially fallible outputs such as `SUM`, `MAX`, casts and unknown functions
+are retained without a dialect/type proof of harmless removal. Native `COUNT`
+and `ROW_NUMBER` removal is currently enabled only for the tested DuckDB/Spark
+semantics; function recognition alone does not authorize deletion.
 Other unsupported shapes remain formatting-only. Raw custom macro call text and counts
 must survive. SQL-fragment macros skip in this default preservation mode.
 
@@ -138,11 +153,17 @@ is written. Expanded queries still pass binding, output-interface, comment,
 render/reparse and fixed-point checks. Expansion is reported as a structural rewrite
 even if no further SQL simplification occurs. Macro definition files are unchanged.
 
-The static allowlist includes argument-free string `upper`, `lower`, and `trim`
-methods/filters, flat tuple-unpacking literal loops, same-type string/numeric/
-boolean comparisons, and boolean short-circuiting. Existing recursion, size,
-loop, and work budgets remain. Arbitrary Python/Jinja execution, adapter/context
+The static allowlist includes argument-free string `upper`, `lower`, and `strip`
+methods and `upper`, `lower`, and `trim` filters, flat tuple-unpacking literal
+loops, same-type string/numeric/Boolean comparisons, and Boolean short-circuiting.
+Recursion, size, loop and work budgets limit expansion. Arbitrary Python/Jinja execution, adapter/context
 calls, database queries, and environment access remain disallowed.
+
+Literal top-level assignments, loops, nested static conditions and whitespace
+controls are also analyzable with the same budgets. Default source optimization
+retains the whole original template unchanged; explicit `--expand true` opts into
+rendering reduced SQL. Runtime-dependent templates still skip rather than guess
+their output shape. See [partial optimization](partial-optimization.md).
 
 The ChangeSet watches snapshot bytes for upstream SQL, macros, configuration,
 properties, and loaded or absent artifact paths, not just selected output files.
@@ -170,10 +191,21 @@ stay excluded until their semantics are tested. See [dialect coverage](../compat
 The [source optimizer tests](../../tests/sql/test_source_optimization.py) cover
 AST bindings, DuckDB output labels, exact types (including decimal precision/scale)
 and row multisets (including duplicates, NULLs, empty/unmatched inputs), overflow
-and conversion-error retention, ordered results, seven SQL dialects, macro
+and conversion-error retention, ordered results, eleven SQL dialects, macro
 preservation, preview byte identity, conflicts, and idempotence. Write-mode tests
 use temporary project copies.
 
-See [testing](../development/testing.md) for portable test commands. Regression
+The strict [execution oracle](../../tests/semantics.py) requires success unless a
+specific error is expected, compares error reasons, and compares ordered rows
+when the outer query promises order. Deliberately broken candidates check that
+lost duplicates, NULLs, rows, ordering, labels and types are detected.
+[Seeded cases](../../tests/sql/test_generated_optimization.py) vary data and query
+constants, including asymmetric empty inputs and multi-rule interactions.
+[Independent Jinja checks](../../tests/sql/test_jinja_execution.py) use real Jinja,
+and the [dbt rebuild test](../../tests/workflows/test_optimizer_dbt_execution.py)
+builds original and rewritten temporary projects with real dbt-duckdb.
+
+See [compatibility](../compatibility.md#sql-dialects) for engine-specific coverage
+and [testing](../development/testing.md) for commands. Regression
 checks are **not a proof of general SQL equivalence, Fabric compatibility, or a
 measured performance/cost improvement**.

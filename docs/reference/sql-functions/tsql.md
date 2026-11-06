@@ -1,4 +1,6 @@
-# T-SQL function gaps
+# T-SQL functions
+
+## dbt-extra local function gaps
 
 These 76 entries fill SQLGlot 30.29.0 recognition/semantic gaps, not native
 function coverage. Sources: Microsoft Learn
@@ -104,3 +106,13 @@ Implementation and executable argument examples:
 | `checksum` | scalar | `INT` | immutable |
 | `binary_checksum` | scalar | `INT` | immutable |
 | `checksum_agg` | aggregate | `INT` | immutable |
+
+<!-- BEGIN GENERATED FUNCTION INVENTORY -->
+## Function implementation reference
+
+All function names and implementation symbols are in the single
+[function implementation matrix](README.md#function-implementation-matrix).
+
+Source scope: SQL Server 17.x documentation; T-SQL function articles.
+See the [official-source snapshot](function_sources.json) for all source URLs (collected 2026-11-05).
+<!-- END GENERATED FUNCTION INVENTORY -->

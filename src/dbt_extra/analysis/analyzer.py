@@ -6,10 +6,11 @@ from sqlglot import exp
 from sqlglot.errors import SqlglotError
 from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
 from dbt_extra.analysis.lineage import column_lineage, qualify_columns
-from dbt_extra.analysis.models import ResourceAnalysis, coverage
-from dbt_extra.analysis.types import inferred_types
-from dbt_extra.sql.macros import macro_calls, parse_model, contains_opaque
-from dbt_extra.sql.references import resolve_ref
+from dbt_extra.analysis.results import ResourceAnalysis, coverage
+from dbt_extra.analysis.type_inference import inferred_types
+from dbt_extra.project.model_sql import parse_model
+from dbt_extra.sql.templates.macros import macro_calls, contains_opaque
+from dbt_extra.project.references import resolve_ref
 from dbt_extra.errors import SpecError
 from dbt_extra.sql.scopes import relation_tables
 from dbt_extra.sql.renderer import sql, render

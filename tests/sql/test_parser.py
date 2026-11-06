@@ -5,7 +5,8 @@ import pytest
 from dbt_extra import SpecError
 from dbt_extra.sql import UnsupportedSQL, parse_authored, render
 from dbt_extra.sql.parser import read_query
-from dbt_extra.sql.scopes import query_scopes, relation_tables, rewrite_scopes, scope_at
+from dbt_extra.sql.scopes import query_scopes, relation_tables, scope_at
+from dbt_extra.sql.edits import rewrite_scopes
 
 
 @pytest.mark.parametrize("code", [

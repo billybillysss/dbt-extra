@@ -17,6 +17,7 @@ from dbt_extra.review import export_review, import_review
 from dbt_extra.inspection import inspect, plan
 from dbt_extra.optimization import optimize
 from dbt_extra.sql.renderer import render
+from dbt_extra.sql.rewrites.session import outcome_text
 from dbt_extra.validation import validate as validate_project
 from dbt_extra.errors import SpecError
 from dbt_extra.files.yaml import dump_yaml
@@ -82,8 +83,8 @@ def finish(changes, preview):
 
 @click.group()
 @click.version_option(version=__version__, prog_name="extra")
-@click.option("--project-dir", type=click.Path(path_type=Path), envvar="EXTRA_PROJECT_DIR",
-              help="dbt project root; overrides EXTRA_PROJECT_DIR, otherwise discover upward from the current directory.")
+@click.option("--project-dir", type=click.Path(path_type=Path), envvar=["EXTRA_PROJECT_DIR", "DBT_PROJECT_DIR"],
+              help="dbt project root; overrides EXTRA_PROJECT_DIR, then DBT_PROJECT_DIR, otherwise discover upward from the current directory.")
 @click.option("--dialect", help="SQL dialect; overrides configuration and manifest adapter.")
 @click.option("--manifest", type=click.Path(exists=True, dir_okay=False, path_type=Path), help="Optional dbt manifest evidence; relative to the current directory.")
 @click.pass_context
@@ -143,7 +144,10 @@ def inspect_command(ctx, table, columns, from_tables, optimized, expand, compile
     click.echo("-- Offline relation resolution; unresolved dbt templates retained. Not executed. Authored files unchanged."
                if settings.get("compile", True) else "-- Authored dbt ref/source boundaries retained; not executed. Authored files unchanged.")
     for issue in issues:
-        click.echo(f"-- Boundary/coverage: {issue['resource_id']}: {issue['reason']}".replace("\n", " "))
+        if issue.get("status") == "not_applicable":
+            continue
+        text = outcome_text(issue) if "rule" in issue else issue["reason"]
+        click.echo(f"-- Boundary/coverage: {issue['resource_id']}: {text}".replace("\n", " "))
     click.echo(plan(tree, parsed, project.dialect) if view == "plan" else render(tree, parsed, project.dialect), nl=view == "plan")
 
 
@@ -208,6 +212,9 @@ def optimize_command(ctx, select, exclude, format, expand, enrich_enabled, previ
                f"{counts['formatted']} formatting-only, {counts['unchanged']} unchanged); "
                 f"{sum(r['changed'] for r in optimization_report.values())} proposed SQL change(s); {len(skipped)} skipped")
     for uid, report in optimization_report.items():
+        for item in report.get("outcomes", []):
+            if item["status"] != "not_applicable":
+                click.echo(f"Optimization {uid}: {outcome_text(item)}".replace("\n", " "))
         for reason in report["retained"]:
             click.echo(f"Retained {uid}: {reason}")
     if options.get("enrich", False):

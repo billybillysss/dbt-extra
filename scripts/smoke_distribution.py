@@ -76,7 +76,7 @@ def check_archives():
 
 def smoke_cli(version):
     with tempfile.TemporaryDirectory(prefix="extra-package-smoke-") as directory:
-        environment = {k: v for k, v in os.environ.items() if k.casefold() != "extra_project_dir"}
+        environment = {k: v for k, v in os.environ.items() if k.casefold() not in {"extra_project_dir", "dbt_project_dir"}}
         executable = Path(sys.executable).parent / ("extra.exe" if os.name == "nt" else "extra")
         assert executable.is_file(), f"Missing installed console command: {executable}"
         result = subprocess.run([str(executable), "--version"], cwd=directory,

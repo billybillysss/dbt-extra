@@ -13,6 +13,9 @@ ADAPTER_DIALECTS = {"fabricspark": "spark", "sqlserver": "tsql"}
 # New dialects stay excluded until their arithmetic semantics are tested.
 INTEGER_LITERAL_FOLD_DIALECTS = frozenset({"duckdb", "postgres", "spark", "tsql", "bigquery"})
 INTEGER_ADD_ZERO_DIALECTS = frozenset({"duckdb"})
+# Membership and equality can have different implicit-cast rules. This permission
+# additionally requires identical, declared base-column integral types.
+INTEGER_MEMBERSHIP_DIALECTS = frozenset({"duckdb", "spark"})
 
 
 def validate_dialect(value):

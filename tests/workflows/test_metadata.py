@@ -9,6 +9,7 @@ from dbt_extra.analysis import analyze
 from dbt_extra.enrichment import enrich
 from dbt_extra.errors import SpecError
 from dbt_extra.files.changes import ChangeSet
+from dbt_extra.project.property_edits import PropertyEdits
 from dbt_extra.files.yaml import load_yaml
 from dbt_extra.review import export_review, import_review
 from dbt_extra.review.import_ import read_review
@@ -39,7 +40,7 @@ def test_import_skips_missing_yaml_entries_without_creating_files(native, kind, 
     assert f"Skipped metadata {uid}" in result.output
     assert snapshot(native) == before
     with pytest.raises(SpecError, match="No existing writable dbt YAML entry"):
-        ChangeSet(native).properties(p, p.resources[uid], {"name": "undocumented", "description": "Reviewed"})
+        PropertyEdits(ChangeSet(native)).properties(p, p.resources[uid], {"name": "undocumented", "description": "Reviewed"})
     assert snapshot(native) == before
 
 
@@ -54,14 +55,14 @@ def test_missing_metadata_does_not_block_supported_sql_edits(native):
     assert "model.shop.undocumented" in changes.metadata_skipped
     changes.apply()
     assert "2 AS id" in sql.read_text()
-    assert not project(native).find("undocumented").properties
+    assert not project(native).find_model("undocumented").properties
 
 
 def test_enrich_skips_missing_entry_and_reports_why(native):
     put(native, "models/undocumented.sql", "select id from {{ ref('orders') }}")
     p = project(native)
     before = snapshot(native)
-    assert analyze(p, p.find("undocumented"))["columns"]
+    assert analyze(p, p.find_model("undocumented"))["columns"]
     changes, report = enrich(p, select=["undocumented"])
     assert len(report) == 1 and "No existing writable dbt YAML entry" in report[0]["reason"]
     assert changes.apply() == []
@@ -79,8 +80,8 @@ def test_enrich_can_inherit_through_undocumented_upstream_in_memory(native):
     assert set(changes.changed()) == {yaml}
     assert any("No existing" in r.get("reason", "") for r in report)
     changes.apply()
-    assert project(native).find("downstream").columns["id"]["description"] == "Order identifier"
-    assert not project(native).find("undocumented").properties
+    assert project(native).find_model("downstream").columns["id"]["description"] == "Order identifier"
+    assert not project(native).find_model("undocumented").properties
 
 
 @pytest.mark.parametrize("style", ["legacy", "column"])
@@ -164,3 +165,20 @@ def test_xlsx_baseline_uses_version_one_and_retains_file_hashes(native):
     assert baseline["format_version"] == 1 and "format" not in baseline
     assert baseline["files"]["models/schema.yml"]
     assert import_review(project(native), path).apply() == []
+
+
+def test_independent_property_editors_compose_staged_yaml(native):
+    p = project(native)
+    changes = ChangeSet(native)
+    first, second = PropertyEdits(changes), PropertyEdits(changes)
+    orders, revenue = p.find_model("orders"), p.find_model("revenue")
+    assert orders.property_path == revenue.property_path
+    before = snapshot(native)
+    first.properties(p, orders, {**orders.properties, "description": "Reviewed orders"})
+    second.properties(p, revenue, {**revenue.properties, "description": "Reviewed revenue"})
+    first.properties(p, orders, {**orders.properties, "description": "Final orders"})
+    assert snapshot(native) == before
+    changes.apply()
+    updated = project(native)
+    assert updated.find_model("orders").properties["description"] == "Final orders"
+    assert updated.find_model("revenue").properties["description"] == "Reviewed revenue"

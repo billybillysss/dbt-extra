@@ -38,7 +38,7 @@ def test_project_yaml_uses_block_style():
 def test_documentation_yaml_uses_block_style(path):
     document = path.read_text(encoding="utf-8")
     examples = re.findall(r"^([ ]*)```yaml\n(.*?)^\1```", document, re.MULTILINE | re.DOTALL)
-    if path == ROOT / "README.md":
+    if path == ROOT / "docs/reference/configuration.md":
         assert examples
     for _, example in examples:
         assert_block_style(yaml.compose(dedent(example)))

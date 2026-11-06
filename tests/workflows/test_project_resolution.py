@@ -11,11 +11,6 @@ from dbt_extra.project import Project
 from tests.helpers import put, snapshot
 
 
-@pytest.fixture(autouse=True)
-def no_project_environment(monkeypatch):
-    monkeypatch.delenv("EXTRA_PROJECT_DIR", raising=False)
-
-
 def test_nearest_dbt_root_wins_over_parent_and_child_settings(tmp_path, monkeypatch):
     put(tmp_path, "dbt_project.yml", "name: outer\n")
     put(tmp_path, "extra_project.yaml", "not: valid settings\n")
@@ -33,13 +28,21 @@ def test_nearest_dbt_root_wins_over_parent_and_child_settings(tmp_path, monkeypa
 
 
 def test_flag_overrides_environment_overrides_discovery(tmp_path, monkeypatch):
-    for name in ("flag", "environment", "cwd"):
+    for name in ("flag", "environment", "dbt_environment", "cwd"):
         put(tmp_path, f"{name}/dbt_project.yml", f"name: {name}\n")
     monkeypatch.chdir(tmp_path / "cwd")
+    monkeypatch.setenv("DBT_PROJECT_DIR", "../dbt_environment")
+    assert Project().name == "dbt_environment"
+    runner = CliRunner()
+    dbt_environment = runner.invoke(cli, ["init", "--preview"])
+    assert dbt_environment.exit_code == 0, dbt_environment.output
+    assert str(tmp_path / "dbt_environment/extra_project.yaml") in dbt_environment.output
+    flag = runner.invoke(cli, ["--project-dir", "../flag", "init", "--preview"])
+    assert flag.exit_code == 0, flag.output
+    assert str(tmp_path / "flag/extra_project.yaml") in flag.output
     monkeypatch.setenv("EXTRA_PROJECT_DIR", "../environment")
     assert Project().name == "environment"
     assert Project("../flag").name == "flag"
-    runner = CliRunner()
     environment = runner.invoke(cli, ["init", "--preview"])
     assert environment.exit_code == 0, environment.output
     assert str(tmp_path / "environment/extra_project.yaml") in environment.output
@@ -49,13 +52,30 @@ def test_flag_overrides_environment_overrides_discovery(tmp_path, monkeypatch):
     assert not list(tmp_path.rglob("extra_project.yaml"))
 
 
-@pytest.mark.parametrize("selection", ["argument", "environment"])
+@pytest.mark.parametrize("selection", ["argument", "EXTRA_PROJECT_DIR", "DBT_PROJECT_DIR"])
 def test_explicit_directory_never_searches_parents(native, monkeypatch, selection):
     monkeypatch.chdir(native)
     directory = "models"
-    if selection == "environment":
-        monkeypatch.setenv("EXTRA_PROJECT_DIR", directory)
+    if selection != "argument":
+        monkeypatch.setenv(selection, directory)
         directory = None
+    with pytest.raises(SpecError, match="No dbt_project.yml"):
+        Project(directory)
+    result = CliRunner().invoke(cli, [*(["--project-dir", directory] if directory else []), "init", "--preview"])
+    assert result.exit_code == 1, result.output
+    assert "No dbt_project.yml" in result.output
+
+
+@pytest.mark.parametrize("selection", ["argument", "EXTRA_PROJECT_DIR"])
+def test_invalid_higher_priority_directory_never_falls_back(native, tmp_path, monkeypatch, selection):
+    monkeypatch.chdir(native)
+    monkeypatch.setenv("DBT_PROJECT_DIR", str(native))
+    directory = str(tmp_path / "missing")
+    if selection == "EXTRA_PROJECT_DIR":
+        monkeypatch.setenv(selection, directory)
+        directory = None
+    else:
+        monkeypatch.setenv("EXTRA_PROJECT_DIR", str(native))
     with pytest.raises(SpecError, match="No dbt_project.yml"):
         Project(directory)
     result = CliRunner().invoke(cli, [*(["--project-dir", directory] if directory else []), "init", "--preview"])

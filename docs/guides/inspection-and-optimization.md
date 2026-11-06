@@ -17,19 +17,10 @@ resolvable `ref` calls and explains the complete definition before applying the
 requested projection. SQLGlot removes provably redundant joins and wrappers;
 joins, filters, grouping, DISTINCT, set operations and multiplicity that affect
 the selected rows remain, even when they require nonselected outputs internally.
-The inspection rules also perform bounded Boolean normalization, guarded filter
-pushdown and inner/cross-join simplification, and factor repeated deterministic
-derived tables into shared CTEs. Subquery merging flattens redundant wrappers;
-factoring common subqueries does not mean every subquery can be removed.
-
-These extra structural rewrites deliberately skip unsupported query shapes.
-Filters are not pushed across row limits, aggregates, window operations, set
-operations or outer joins; join reordering also skips `OR` join predicates.
-Common-subquery factoring skips scoped CTEs, limited/correlated queries,
-order-sensitive aggregates and stored-self relation metadata. Volatile or unknown
-functions retain the existing no-optimization guard. SQLGlot's full default
-pipeline, including subquery unnesting and type-dependent canonicalization, is
-not enabled. These are logical rewrites, not warehouse cost optimization.
+Unsupported shapes and unknown, volatile or fallible expressions retain
+boundaries without blocking unrelated safe work. See
+[partial optimization](partial-optimization.md#requirements-and-boundaries) for
+the evidence required for pruning, predicate movement and join changes.
 
 Use `--optimize false` to retain the unsimplified explanation. This is more than
 a list of value-lineage origins. `--from` retains selected upstream models as logical
@@ -65,20 +56,110 @@ and bounded literal-list loops are supported, but dbt context, adapters, databas
 queries, environment access and arbitrary Jinja operations are not executed.
 These previews never replace authored macro calls in source files.
 
+Top-level literal `{% set %}`, bounded literal `{% for %}` and statically decidable
+`if`/`elif`/`else` blocks use the same restricted interpreter. `ref`, `source`,
+`config` and `this` remain dbt calls. Runtime-dependent blocks remain boundaries;
+no values are invented for `var`, `env_var`, `run_query` or `is_incremental()`.
+
 Unknown schemas, unsupported templates, recursive SQL, package/artifact-only
 resources, and history-sensitive/incremental definitions retain explicit
 boundaries with reasons. Inspection is not a claim that expanded definitions
 equal the data currently stored in persisted relations. Nothing is executed.
 
+### Simplify the logic for one selected column
+
+Run these commands from `examples/jaffle_shop` with an installed `extra`, or
+replace `extra` with `uv run extra` when using the checkout. Stop at `orders`
+and keep its `ref` visible to compare the same selected output.
+
+First, disable simplification:
+
+```bash
+extra inspect customer_revenue --columns revenue --from orders --optimize false --compile false
+```
+
+SQL output (CLI comments omitted):
+
+```sql
+SELECT
+  "customer_revenue"."revenue" AS "revenue"
+FROM (
+  WITH order_totals AS (
+    SELECT
+      customer_id,
+      SUM(amount) AS revenue,
+      COUNT(*) AS order_count
+    FROM {{ ref('orders') }}
+    GROUP BY
+      customer_id
+  )
+  SELECT
+    customer_id,
+    revenue + 0 AS revenue,
+    order_count
+  FROM order_totals
+) AS "customer_revenue";
+```
+
+Then use the default simplification:
+
+```bash
+extra inspect customer_revenue --columns revenue --from orders --compile false
+```
+
+```sql
+SELECT
+  order_totals.revenue + 0 AS "revenue"
+FROM (
+  SELECT
+    SUM("orders".amount) AS revenue
+  FROM {{ ref('orders') }} AS "orders"
+  GROUP BY
+    "orders".customer_id
+) AS order_totals;
+```
+
+The unused `COUNT(*) AS order_count` and `customer_id` projections are removed.
+`GROUP BY customer_id` remains because it determines the rows contributing to
+each revenue value. `revenue + 0` also remains: removing it requires exact type
+evidence. Both commands are read-only.
+
+### Readable aliases
+
+Authored aliases are preserved, including short aliases such as `c` or role names
+such as `buyer`. Generated aliases use logical model/source names rather than
+internal analysis counters. Column-only wrappers and single-input CTEs are removed
+when their removal preserves evaluation and bindings; necessary boundaries remain.
+
+Names are generated deterministically:
+
+1. Start with the model name or source table name; a retained selected-output
+   wrapper uses the inspected model name.
+2. Normalize generated names to lowercase underscore-separated words and remove
+   a leading `stg_`, `brz_`, `slv_` or `gld_` layer prefix.
+3. Above the 30-character target, abbreviate words left to right using a fixed
+   dictionary: `customer → cust`, `customers → custs`, `transaction → txn`,
+   `transactions → txns`, `revenue → rev`, `summary → sum`. Stop once it fits.
+4. If still too long, retain complete leading words and append six hexadecimal
+   characters derived from SHA-256 of the original name. No business roles are guessed.
+5. Reserve existing identifiers, including enclosing names. On a collision, try
+   the source/package context, then append `_2`, `_3`, etc. Suffixes can exceed the
+   soft length target. Existing aliases and output column names are not shortened.
+
+For example, `gld_finance_customer_lifetime_revenue_summary` becomes
+`finance_cust_lifetime_rev_sum`. Expanded subqueries with long generated names
+include an `Expanded from:` comment retaining the original name. Unexpanded
+relations retain the full name in the relation or dbt reference itself.
+
 ## Preview authored SQL changes
 
 ```bash
 extra --project-dir examples/jaffle_shop optimize --select customer_revenue --preview
-extra --project-dir examples/jaffle_shop optimize --select customer_revenue
 ```
 
 Preview shows a diff of the actual source file and writes nothing. Applying the
-command changes that same authored `.sql` file. Files under `target/compiled`
+command without `--preview` changes that same authored `.sql` file. Use a disposable
+project copy when trying write mode on the bundled teaching inputs. Files under `target/compiled`
 are not edited. `--preview` is the only no-write flag.
 
 Literal leading `config`, static `ref` (including package/version arguments),
@@ -86,30 +167,22 @@ Literal leading `config`, static `ref` (including package/version arguments),
 evaluated. Only a restricted SQLGlot rule set is used. Output names/order,
 comments and SQL/Jinja round-trip checks must survive.
 
-Opaque macros, dynamic `if`/`for` blocks, unsafe whitespace controls, volatile or
-unknown functions, recursive queries and unsupported constructs are skipped
-with a reason. dbt-extra does not infer uniqueness or remove joins from documentation.
-Narrow positive equality-EXISTS filters can become set-membership filters, and
-identical complementary UNION ALL scans can collapse while excluding NULL keys.
-Guarded predicate pushdown, bounded Boolean normalization, inner/cross-join
-simplification and repeated deterministic subquery factoring also apply to source
-SQL. Other unsupported correlated shapes still skip. No `dbt compile` is required.
-Existing compiled artifacts are never a rewrite input.
+By default (`--expand false`), supported scalar macros are analyzed by bounded
+static expansion but remain authored calls. Projection pruning accounts for
+identifiers hidden in their arguments. Unsupported templates and recursive queries
+retain boundaries; unknown SQL functions do not automatically skip the model.
+Qualification, type and schema requirements can limit structural work while
+allowing independent literal simplification or formatting.
 
-By default (`--expand false`), supported scalar macros are validated by bounded static expansion. A guarded
-source rule removes unused columns and grouped aggregates using expanded
-dependencies, including identifiers hidden in macro arguments; exact macro calls
-remain authored. Independent local constants and Boolean identities can simplify
-even with macros, aggregates, windows or limits; macro-containing expressions and
-scope boundaries are not moved. Arithmetic identities require exact type evidence:
-`+ 0` stays for decimal/unknown inputs, and decimal constant arithmetic is not
-folded merely because its value is unchanged. Reports explain retained arithmetic,
-DISTINCT tuples, and movement boundaries. Other supported shapes can still receive formatting-only
-changes, which are reported separately from real structural rewrites and binding
-qualification. Structural rewrites require validated bindings and complete
-schemas where needed, never assumed-complete documentation columns. See
-[source optimizer safety](source-optimizer-safety.md) for schema evidence,
-rewrite boundaries, fixed-point checks, conflict protection, and validation details.
+Reports distinguish structural rewrites, qualification, formatting-only changes
+and unchanged SQL. Read retained reasons and rule outcomes, not just the changed
+file count. See [source optimizer safety](source-optimizer-safety.md) for enabled
+rules, schema evidence, arithmetic/evaluation guards and conflict checks.
+
+`--format pretty` puts supported leading `config()` arguments on separate lines
+with indented collections; `compact` uses one line except for multiline strings.
+Both preserve values, quote style, key order and supported dynamic expressions
+without evaluating Jinja. Unsupported config expressions are left unchanged.
 
 To replace macro calls in model files with expanded SQL, use:
 
@@ -124,24 +197,16 @@ definitions are not inlined and macro definition files are unchanged. Unsupporte
 macros skip the entire model rather than writing a partial expansion. The same
 binding, comment, interface and fixed-point guards apply after expansion.
 
-## Enrich metadata
+Top-level static templates are preserved **byte-for-byte as a whole** by default;
+the optimizer does not reconstruct or flatten their original loop/branch structure.
+Explicit `--expand true` may reduce them to SQL, retaining literal dbt calls.
+See [partial optimization](partial-optimization.md) for supported proofs,
+diagnostic fields, recovery semantics and remaining boundaries.
 
-`extra enrich --preview` fills missing statically inferred column types and
-unambiguous bare-column passthrough/rename descriptions. Transformed expressions
-do not inherit descriptions as though their business meaning were unchanged.
-Missing schema or Jinja evidence leaves properties unresolved. Authored values
-are not overwritten. Proposals stay in memory; use `--preview` to inspect the diff
-before applying with `extra enrich`. Only existing dbt YAML model entries are
-updated. Models without one are skipped with a reason; add an entry in dbt first.
-No properties file is created automatically. Existing semantic-model, entity,
-dimension and metric definitions are preserved, not inferred or converted.
-The dbt Semantic Layer is not required for ordinary SQL inspection or enrichment.
+## Related workflows
 
-SQL-function type inference is dialect-aware and best-effort. See
-[SQL-function enrichment](../reference/sql-functions/README.md) for verified Spark and
-T-SQL examples, input-schema requirements, unresolved cases and how coverage grows.
-Recognizing a function is not a guarantee of inferring its type or safely rewriting it.
-
-After review, run dbt's own parsing, tests and builds independently. Logical
-equivalence checks, metadata inference, executed data tests and warehouse
-performance measurements answer different questions.
+Use `optimize --enrich true --preview` to include missing-metadata proposals in the
+same diff. See [metadata enrichment](metadata-enrichment.md) for the YAML example
+and inference limits, and the [optimizer walkthrough](../../examples/jaffle_shop/models/gld/optimization/README.md)
+for focused rewrite examples. Run dbt parsing, tests and builds independently
+after reviewing any source changes.

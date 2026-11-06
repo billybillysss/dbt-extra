@@ -2,9 +2,9 @@
 
 import pytest
 
-from dbt_extra.optimization import optimize_source
-from dbt_extra.sql.config_format import format_configs
-from dbt_extra.sql.jinja import validate_template
+from dbt_extra.sql.rewrites.engine import optimize_source
+from dbt_extra.sql.templates.config_format import format_configs
+from dbt_extra.sql.templates.syntax import validate_template
 from tests.helpers import invoke, put, snapshot
 
 

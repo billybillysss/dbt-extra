@@ -13,7 +13,7 @@ import pytest
 
 from dbt_extra import __version__
 from dbt_extra.cli import cli
-from dbt_extra.analysis import catalog
+from dbt_extra.analysis import analyze, catalog
 from dbt_extra.project import Project
 from dbt_extra.files.yaml import load_yaml
 from dbt_extra.sql.parser import parse_authored
@@ -22,6 +22,7 @@ from tests.helpers import optimizer_inputs, snapshot
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples/jaffle_shop"
+COLUMN_TRACE = ROOT / "examples/column_trace"
 DOCUMENTS = sorted({
     *ROOT.glob("*.md"), *(ROOT / "docs").rglob("*.md"),
     *(ROOT / "examples").rglob("README.md"),
@@ -33,6 +34,13 @@ DOCUMENTS = sorted({
 def dbt_example(tmp_path):
     destination = tmp_path / "examples/jaffle_shop"
     shutil.copytree(EXAMPLE, destination, ignore=shutil.ignore_patterns("target", "logs", "extra", "dbt_packages"))
+    return destination
+
+
+@pytest.fixture
+def column_trace(tmp_path):
+    destination = tmp_path / "examples/column_trace"
+    shutil.copytree(COLUMN_TRACE, destination)
     return destination
 
 
@@ -74,10 +82,26 @@ def test_json_examples_parse(path):
         json.loads(block)
 
 
-def test_readme_config_and_native_example(tmp_path):
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    example = tmp_path / "readme.yml"
-    example.write_text(blocks(readme, "yaml")[0], encoding="utf-8")
+@pytest.mark.parametrize("example", [0, 1])
+def test_function_semantics_examples_match_the_optimizer(example):
+    from dbt_extra.sql.rewrites.engine import optimize_source
+
+    text = (ROOT / "docs/reference/sql-functions/README.md").read_text(encoding="utf-8")
+    section = text.split("## Why dbt-extra defines SQL function semantics\n", 1)[1].split("\n## ", 1)[0]
+    examples = blocks(section, "sql")
+    assert len(examples) == 4
+    before, after = examples[example * 2:example * 2 + 2]
+    assert optimize_source(before, "spark", schema={"t": {"id": "BIGINT"}}).strip() == after.strip()
+
+
+@pytest.mark.parametrize("document, heading", [
+    ("docs/reference/configuration.md", "# Project configuration\n"),
+    ("README.md", "## Configure an existing project\n"),
+])
+def test_documented_config_and_native_example(tmp_path, document, heading):
+    configuration = (ROOT / document).read_text(encoding="utf-8").split(heading, 1)[1]
+    example = tmp_path / "settings.yml"
+    example.write_text(blocks(configuration, "yaml")[0], encoding="utf-8")
     settings = load_yaml(example)
     assert settings["version"] == 2
     assert settings["analysis"] == load_yaml(EXAMPLE / "extra_project.yaml")["analysis"]
@@ -98,24 +122,78 @@ def test_readme_inspection_example_matches_cli():
     assert "completed" in query
 
 
-def test_readme_shown_sql_matches_cli(dbt_example):
+@pytest.mark.parametrize("document, heading", [
+    ("docs/getting-started.md", "## See where a column comes from\n"),
+    ("README.md", "### Preserve filters and grouping\n"),
+])
+def test_documented_inspection_sql_matches_cli(dbt_example, document, heading):
     before = snapshot(dbt_example)
     result = CliRunner().invoke(cli, ["--project-dir", str(dbt_example), "inspect",
-        "customer_revenue", "--columns", "revenue", "--compile", "false"])
+        "customer_revenue", "--columns", "revenue"])
     assert result.exit_code == 0, result.output
     query = "\n".join(line for line in result.output.splitlines() if not line.startswith("--"))
-    section = (ROOT / "README.md").read_text(encoding="utf-8").split("## See where a column comes from\n", 1)[1].split("\n## ", 1)[0]
+    section = (ROOT / document).read_text(encoding="utf-8").split(heading, 1)[1].split("\n## ", 1)[0]
     shown = blocks(section, "sql")
     assert len(shown) == 1
     assert shown[0].strip() == query.strip()
     assert snapshot(dbt_example) == before
 
 
-def test_readme_selected_column_simplification_matches_cli(dbt_example, monkeypatch):
+def test_readme_column_trace_matches_project_and_cli(dbt_example):
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    section = readme.split("### Trace a column through multiple dbt layers\n", 1)[1].split("\n### ", 1)[0]
+    shown = blocks(section, "sql")
+    names = ["stg_customers", "customer_details", "customer_profile"]
+    assert len(shown) == 5
+    for name, sql in zip(names, shown[2:]):
+        folder = "gld" if name == "customer_profile" else "slv"
+        assert (dbt_example / f"models/{folder}/{name}.sql").read_text(encoding="utf-8").strip() == sql.strip()
+
+    before = snapshot(dbt_example)
+    runner = CliRunner()
+    arguments = ["--project-dir", str(dbt_example), "inspect", "customer_profile", "--columns", "customer_name"]
+    result = runner.invoke(cli, arguments)
+    assert result.exit_code == 0, result.output
+    query = "\n".join(line for line in result.output.splitlines() if not line.startswith("--"))
+    assert query.strip() == shown[0].strip()
+    assert "{{" not in query
+    assert "main_raw.raw_customers" in query
+    assert 'TRIM("customers".first_name)' in query
+    assert "WITH" not in query and "FROM (" not in query
+
+    expanded = runner.invoke(cli, [*arguments, "--optimize", "false"])
+    assert expanded.exit_code == 0, expanded.output
+    expanded_query = "\n".join(line for line in expanded.output.splitlines() if not line.startswith("--"))
+    assert expanded_query.strip() == shown[1].strip()
+    assert "first_name AS customer_name" in expanded.output
+    assert "TRIM(first_name) AS first_name" in expanded.output
+    assert "WITH customer_input" in expanded.output
+    expanded_tree = parse_authored(expanded.output, "duckdb").tree
+    assert expanded_tree.args["from_"].this.this.named_selects == [
+        "customer_id", "customer_name", "last_name",
+    ]
+    assert snapshot(dbt_example) == before
+
+
+@pytest.mark.parametrize("name, column, upstream_id, upstream_column, expression", [
+    ("customer_profile", "customer_name", "model.jaffle_shop.customer_details", "first_name", "first_name"),
+    ("customer_details", "first_name", "model.jaffle_shop.stg_customers", "first_name", "first_name"),
+    ("stg_customers", "first_name", "source.jaffle_shop.jaffle_shop.customers", "first_name", "TRIM(first_name)"),
+])
+def test_readme_column_trace_lineage_matches_analysis(dbt_example, name, column, upstream_id, upstream_column, expression):
+    project = Project(dbt_example)
+    columns = analyze(project, project.find_model(name), expand=True)["columns"]
+    selected = next(item for item in columns if item["name"] == column)
+    assert selected["status"] == "resolved"
+    assert selected["expression"] == expression
+    assert selected["upstream_columns"] == [{"resource_id": upstream_id, "column": upstream_column}]
+
+
+def test_documented_selected_column_simplification_matches_cli(dbt_example, monkeypatch):
     monkeypatch.delenv("EXTRA_PROJECT_DIR", raising=False)
     monkeypatch.chdir(dbt_example)
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    section = readme.split("### Simplify the logic for one selected column\n", 1)[1].split("\n## ", 1)[0]
+    guide = (ROOT / "docs/guides/inspection-and-optimization.md").read_text(encoding="utf-8")
+    section = guide.split("### Simplify the logic for one selected column\n", 1)[1].split("\n## ", 1)[0]
     commands, shown = blocks(section, "bash"), blocks(section, "sql")
     assert len(commands) == len(shown) == 2
     before = snapshot(dbt_example)
@@ -129,14 +207,18 @@ def test_readme_selected_column_simplification_matches_cli(dbt_example, monkeypa
         assert snapshot(dbt_example) == before
     assert "COUNT(*) AS order_count" in shown[0]
     assert "order_count" not in shown[1]
-    assert 'SUM("extra_input_1".amount)' in shown[1]
-    assert 'GROUP BY\n      "extra_input_1".customer_id' in shown[1]
-    assert "order_totals.revenue + 0 AS revenue" in shown[1]
+    assert 'SUM("orders".amount)' in shown[1]
+    assert 'GROUP BY\n    "orders".customer_id' in shown[1]
+    assert 'order_totals.revenue + 0 AS "revenue"' in shown[1]
 
 
-def test_readme_enrichment_yaml_matches_real_proposal(dbt_example, tmp_path):
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    section = readme.split("## Fill missing metadata with real YAML\n", 1)[1].split("\n## ", 1)[0]
+@pytest.mark.parametrize("document, heading", [
+    ("docs/guides/metadata-enrichment.md", "## YAML proposal\n"),
+    ("README.md", "## Fill missing column metadata\n"),
+])
+def test_documented_enrichment_yaml_matches_real_proposal(dbt_example, tmp_path, document, heading):
+    guide = (ROOT / document).read_text(encoding="utf-8")
+    section = guide.split(heading, 1)[1].split("\n## ", 1)[0]
     examples = blocks(section, "yaml")
     assert len(examples) == 2
     shown = []
@@ -167,8 +249,13 @@ def test_readme_enrichment_yaml_matches_real_proposal(dbt_example, tmp_path):
     assert {path for path in before if before[path] != after[path]} == {"models/schema.yml"}
 
 
-def test_readme_settings_support_named_view_and_workflow_defaults(dbt_example):
-    settings = blocks((ROOT / "README.md").read_text(encoding="utf-8"), "yaml")[0]
+@pytest.mark.parametrize("document, heading", [
+    ("docs/reference/configuration.md", "# Project configuration\n"),
+    ("README.md", "## Configure an existing project\n"),
+])
+def test_documented_settings_support_named_view_and_workflow_defaults(dbt_example, document, heading):
+    configuration = (ROOT / document).read_text(encoding="utf-8").split(heading, 1)[1]
+    settings = blocks(configuration, "yaml")[0]
     (dbt_example / "extra_project.yaml").write_text(settings, encoding="utf-8")
     project = Project(dbt_example)
     assert project.options("inspection", {})["compile"] is True
@@ -181,7 +268,7 @@ def test_readme_settings_support_named_view_and_workflow_defaults(dbt_example):
     assert snapshot(dbt_example) == before
 
 
-def test_readme_json_example_includes_explicit_upstream_context(dbt_example):
+def test_documented_json_example_includes_explicit_upstream_context(dbt_example):
     result = CliRunner().invoke(cli, ["--project-dir", str(dbt_example), "export", "--format", "json",
         "--select", "customer_revenue", "orders", "demo_raw_orders", "--output-dir", "extra/review-json"])
     assert result.exit_code == 0, result.output
@@ -193,7 +280,8 @@ def test_readme_json_example_includes_explicit_upstream_context(dbt_example):
     }
 
 
-def test_documented_description_review_round_trip(dbt_example):
+@pytest.mark.parametrize("document", ["docs/guides/catalog-round-trip.md", "README.md"])
+def test_documented_description_review_round_trip(dbt_example, document):
     """Follow the Excel guide on a disposable project, never the teaching inputs."""
     runner = CliRunner()
     arguments = ["--project-dir", str(dbt_example)]
@@ -201,7 +289,9 @@ def test_documented_description_review_round_trip(dbt_example):
     result = runner.invoke(cli, [*arguments, "export", "--format", "xlsx", "--select", "customer_revenue"])
     assert result.exit_code == 0, result.output
     workbook = dbt_example / "extra/review/review.xlsx"
-    guide = (ROOT / "docs/guides/catalog-round-trip.md").read_text(encoding="utf-8")
+    guide = (ROOT / document).read_text(encoding="utf-8")
+    if document == "README.md":
+        guide = guide.split("## Review and edit in Excel\n", 1)[1].split("\n## ", 1)[0]
     description = blocks(guide, "text")[0].strip()
     book = load_workbook(workbook)
     edited = 0
@@ -248,18 +338,108 @@ def test_github_issue_forms_have_valid_required_inputs(name):
     assert any(field.get("validations", {}).get("required") is True for field in inputs)
 
 
-def test_readme_python_api_is_read_only(monkeypatch, dbt_example, tmp_path):
+@pytest.mark.parametrize("document", ["docs/reference/python-api.md", "README.md"])
+def test_documented_python_api_is_read_only(monkeypatch, dbt_example, document):
     monkeypatch.delenv("EXTRA_PROJECT_DIR", raising=False)
     monkeypatch.chdir(dbt_example)
     before = snapshot(dbt_example)
     namespace = {}
-    exec(blocks((ROOT / "README.md").read_text(encoding="utf-8"), "python")[0], namespace)
+    exec(blocks((ROOT / document).read_text(encoding="utf-8"), "python")[0], namespace)
     assert namespace["document"]["resources"][0]["name"] == "customer_revenue"
     assert not namespace["skipped"]
+    if document == "README.md":
+        assert 'AS "revenue"' in namespace["explanation"]
+        assert "Logical plan" in namespace["logical_plan"]
+        assert namespace["changes"].optimization_report
+        assert sum("value" in item for item in namespace["report"]) == 4
     assert snapshot(dbt_example) == before
 
 
-def test_readme_optimization_rewrites_only_authored_sql(dbt_example):
+@pytest.mark.parametrize("document", ["docs/reference/python-api.md", "README.md"])
+def test_documented_standalone_python_example(document):
+    namespace = {}
+    exec(blocks((ROOT / document).read_text(encoding="utf-8"), "python")[1], namespace)
+    assert any(outcome["status"] == "applied" for outcome in namespace["outcomes"])
+
+
+def test_readme_has_a_command_example_for_every_cli_feature():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    commands = "\n".join(blocks(readme, "bash"))
+    for name in cli.commands:
+        assert re.search(rf"^(?:uv run )?extra (?:--dialect \w+ )?{name}(?: |$)", commands, re.MULTILINE), name
+
+
+def test_readme_cli_walkthrough_preserves_dbt_inputs(dbt_example, column_trace, monkeypatch):
+    """Check runnable syntax; the separate round-trip test supplies the Excel edit."""
+    monkeypatch.delenv("EXTRA_PROJECT_DIR", raising=False)
+    monkeypatch.chdir(dbt_example)
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    before = snapshot(dbt_example)
+    trace_before = snapshot(column_trace)
+    runner = CliRunner()
+    for block in blocks(readme, "bash"):
+        for line in block.splitlines():
+            if not line.startswith("uv run extra "):
+                continue
+            arguments = shlex.split(line)[3:]
+            previous = snapshot(dbt_example)
+            result = runner.invoke(cli, arguments)
+            assert result.exit_code == 0, f"{line}\n{result.output}"
+            if arguments[0] in {"inspect", "validate"} or "--preview" in arguments:
+                assert snapshot(dbt_example) == previous
+    after = snapshot(dbt_example)
+    assert snapshot(column_trace) == trace_before
+    assert all(after[path] == content for path, content in before.items())
+    assert {path for path in after if path not in before} == {
+        "extra/review/review.xlsx", "extra/review-expanded/review.xlsx",
+        "extra/review-csv/resources.csv", "extra/review-csv/columns.csv",
+        "extra/review-csv/_baseline.json", "extra/review-csv/README.txt",
+        "extra/review-json/review.json",
+    }
+
+
+@pytest.mark.parametrize("heading, name, expand", [
+    ("## Optimize authored SQL\n", "gld_optimizer_constants", False),
+    ("### Expand static local macros and templates\n", "macro_revenue", True),
+])
+def test_readme_source_optimization_before_and_after(dbt_example, heading, name, expand):
+    from dbt_extra.optimization import optimize
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    section = re.split(r"\n#{2,3} ", readme.split(heading, 1)[1], maxsplit=1)[0]
+    shown = blocks(section, "sql")
+    assert len(shown) == 2
+    project = Project(dbt_example)
+    resource = project.find_model(name)
+    before = snapshot(dbt_example)
+    changes, skipped = optimize(project, select=[name], expand=expand)
+    assert not skipped
+    original = resource.code.replace("\r\n", "\n")
+    proposed = changes.changed()[resource.path].decode("utf-8").replace("\r\n", "\n")
+    if expand:
+        assert original.strip() == shown[0].strip()
+        assert proposed.strip() == shown[1].strip()
+    else:
+        parsed_before = parse_authored(original, project.dialect)
+        parsed_after = parse_authored(proposed, project.dialect)
+        assert original.removeprefix(parsed_before.prefix).strip() == shown[0].strip()
+        assert proposed.removeprefix(parsed_after.prefix).strip() == shown[1].strip()
+        assert parsed_before.config == parsed_after.config
+    assert snapshot(dbt_example) == before
+
+
+def test_cli_reference_covers_commands_and_options():
+    reference = (ROOT / "docs/reference/cli.md").read_text(encoding="utf-8")
+    for name in cli.commands:
+        assert f"## {name.title()}\n" in reference
+    for command in [cli, *cli.commands.values()]:
+        for parameter in command.params:
+            for option in (*getattr(parameter, "opts", []), *getattr(parameter, "secondary_opts", [])):
+                if option.startswith("-"):
+                    assert option in reference, f"Undocumented option: {command.name} {option}"
+
+
+def test_documented_optimization_rewrites_only_authored_sql(dbt_example):
     destination = dbt_example
     path = destination / "models/gld/customer_revenue.sql"
     # The working example may already have been optimized; seed this isolated copy.

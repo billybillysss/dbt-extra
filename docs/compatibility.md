@@ -4,7 +4,7 @@
 
 | Surface | Current contract |
 | --- | --- |
-| Package | `dbt-extra`, version `0.2.0`; private preview, pre-1.0. Executable `extra`, Python namespace `dbt_extra`. Pin and test upgrades. |
+| Package | `dbt-extra`, version `0.2.1`; private preview, pre-1.0. Executable `extra`, Python namespace `dbt_extra`. Pin and test upgrades. |
 | Python | Metadata requires 3.11+. CI targets 3.11 and 3.13 on Linux, plus 3.13 on Windows. Other Python/platform combinations are not thereby certified. |
 | SQLGlot | Runtime dependency is `>=30.29.0`; the local function-gap catalog is checked against 30.29.0. Dialect availability does not establish warehouse execution support. |
 | Tool settings | Optional `extra_project.yaml`, `version: 2`; no transformation authoring schema. |
@@ -20,8 +20,9 @@ No macOS CI or warehouse performance benchmark is currently provided.
 SQLGlot upgrades require regression review, including window-alias `QUALIFY`,
 rendering and the local function-gap catalog. New native recognition must retire
 or revise a local entry rather than inflate the gap count. A minimum dependency
-version is not certification of every later release; CI also tests a freshly
-resolved installed wheel.
+version is not certification of every later release; CI tests the minimum and
+freshly resolved SQLGlot against optimizer regressions, plus a freshly resolved
+installed wheel.
 
 ## SQL dialects
 
@@ -29,7 +30,12 @@ resolved installed wheel.
 - **Shared regression matrix:** `duckdb`, `postgres`, `snowflake`, `bigquery`,
   `spark`, `tsql`, `fabric`, `databricks`, `redshift`, `trino`, and `athena` for offline
   parsing, rendering and rewrites.
-- **Execution checks:** DuckDB only; these tests do not certify other warehouses.
+- **Execution checks:** DuckDB differential tests, independent Jinja checks and
+  an opt-in real dbt-duckdb before/after rebuild; opt-in local Spark 4.2.1 with ANSI
+  mode on/off; and a dedicated PostgreSQL 16 service lane for portable optimizer
+  cases. Engine execution is separate from cross-dialect parse/render coverage.
+  These do not certify all rules/types, other warehouses or engine versions.
+  See the [rule coverage limits](guides/source-optimizer-safety.md#regression-coverage).
 
 Manifest autodetection translates only differing adapter names: `fabricspark`
 to `spark`, and `sqlserver` to `tsql`. `fabric` keeps SQLGlot's dedicated Fabric
@@ -42,19 +48,24 @@ Related SQLGlot dialects do not automatically inherit them. A future dedicated
 `fabricspark` dialect would require a reviewed mapping change and regression tests,
 not an automatic switch based on the installed dependency version.
 
+See [partial optimization](guides/partial-optimization.md) for rule-specific
+boundaries, rule-checkpoint recovery and outcome reporting. Unknown or
+volatile expressions do not veto independent safe work. Unproven fallible
+outputs and joins are retained. Authored
+top-level static templates remain intact unless expansion is explicitly enabled.
+
 SQL-function type inference has its own
-[implemented function catalogs](reference/sql-functions/README.md): 86 Spark and
-76 T-SQL SQLGlot gaps, with separate recognition/shape, type, rewrite-safety and
-enrichment tests. These are not counts of SQLGlot-native functions. Other dialects
-have no local gap catalog; dialect parsing/rendering coverage alone does not
-certify enrichment or warehouse execution.
+[implemented function catalogs](reference/sql-functions/README.md#implemented-dialect-catalogs),
+with separate recognition/shape, type, rewrite-safety and enrichment tests. The
+generated catalog table is the source for current counts; these are not counts
+of SQLGlot-native functions or exhaustive inventories. Parsing/rendering coverage
+alone does not certify enrichment or warehouse execution.
 
-## Initial version
+## Distribution status
 
-`dbt-extra` starts at `0.1.0` as a private preview.
-Install from an authorized source checkout and record its Git commit when
-reporting results. The repository stays private until
-verification and separate maintainer approval to make it public.
+Install the private preview from an authorized source checkout and record its
+Git commit when reporting results. Public access requires separate maintainer
+approval; the presence of release automation does not imply publication.
 
 Public visibility, package publication and branding are separate release gates;
 see the [release checklist](development/releasing.md).

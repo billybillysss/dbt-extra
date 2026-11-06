@@ -1,8 +1,9 @@
 """Offline project/template/reference checks; not a dbt parse or build."""
 
 from dbt_extra.analysis.dependencies import dependencies, validate_cycles
-from dbt_extra.sql.jinja import validate_template
-from dbt_extra.sql.parser import UnsupportedSQL, parse_authored
+from dbt_extra.sql.templates.syntax import validate_template
+from dbt_extra.sql.models import UnsupportedSQL
+from dbt_extra.sql.parser import parse_authored
 
 
 def validate(project):

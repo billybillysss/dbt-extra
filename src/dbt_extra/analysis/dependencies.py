@@ -1,7 +1,7 @@
 """Resource dependency graphs and cycle checks."""
 
 from dbt_extra.errors import SpecError
-from dbt_extra.sql.references import resolve_ref
+from dbt_extra.project.references import resolve_ref
 
 
 def dependencies(project, parsed):

@@ -6,16 +6,19 @@ from pathlib import Path
 from sqlglot import exp
 
 from dbt_extra.errors import SpecError
-from dbt_extra.files.changes import ChangeSet
+from dbt_extra.workflow_results import WorkflowChanges
+from dbt_extra.project.property_edits import PropertyEdits
 from dbt_extra.files.paths import within
 from dbt_extra.review.contract import EDITABLE, HEADERS, key_for, structured
 from dbt_extra.review.csv import read_csv
-from dbt_extra.review.workbook import read_workbook
-from dbt_extra.sql.jinja import validate_template
-from dbt_extra.sql.parser import UnsupportedSQL, parse_authored
-from dbt_extra.sql.macros import parse_model, macro_calls, single_expression, contains_opaque
+from dbt_extra.review.xlsx.reader import read_workbook
+from dbt_extra.sql.templates.syntax import validate_template
+from dbt_extra.sql.models import UnsupportedSQL
+from dbt_extra.sql.parser import parse_authored
+from dbt_extra.project.model_sql import parse_model
+from dbt_extra.sql.templates.macros import macro_calls, single_expression, contains_opaque
 from dbt_extra.sql.renderer import render
-from dbt_extra.sql.scopes import rewrite_scopes
+from dbt_extra.sql.edits import rewrite_scopes
 
 
 def read_review(path, *, workbook_edits=None):
@@ -30,8 +33,8 @@ def import_review(project, path):
     tables, baseline = read_review(path, workbook_edits=workbook_edits)
     if "format" in baseline or baseline.get("format_version") != 1 or baseline.get("project") != project.name:
         raise SpecError("Review baseline is incompatible with this dbt project; re-export before editing")
-    changes = ChangeSet(project.root)
-    changes.metadata_skipped = {}
+    changes = WorkflowChanges(project.root)
+    properties = PropertyEdits(changes)
     edited = {name: {} for name in HEADERS}
     for name, rows in tables.items():
         original = {key_for(name, r): r for r in baseline["tables"][name]}
@@ -68,7 +71,7 @@ def import_review(project, path):
                 changes.watch(path, baseline["files"][relative], check=True)
     for edit in config_edits:
         value = structured(edit["changes"]["config"], "Configuration")
-        changes.project_config(project, edit["config_path"], value)
+        properties.project_config(project, edit["config_path"], value)
     for uid in sorted(affected):
         if uid not in project.resources:
             raise SpecError(f"Resource no longer exists: {uid}")
@@ -127,7 +130,7 @@ def import_review(project, path):
         proposed.setdefault("name", resource.name)
         if proposed != resource.properties and (resource.properties or proposed != {"name": resource.name}):
             if resource.property_path:
-                changes.properties(project, resource, proposed)
+                properties.properties(project, resource, proposed)
             else:
                 changes.metadata_skipped[uid] = "No existing writable dbt YAML entry; add one in dbt and re-export"
         full_sql_changed = row["sql"] != old["sql"]

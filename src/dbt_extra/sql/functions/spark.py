@@ -5,7 +5,7 @@ None means argument-dependent/unsupported type, never an assumed scalar type.
 All calls retain the error/evaluation rewrite barrier, including try_* variants.
 """
 
-from dbt_extra.sql.functions import Function as F
+from dbt_extra.sql.functions.models import FunctionSpec as F
 
 
 FUNCTIONS = (

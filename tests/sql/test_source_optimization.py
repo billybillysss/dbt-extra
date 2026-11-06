@@ -8,20 +8,22 @@ import pytest
 from sqlglot import exp
 
 from dbt_extra.errors import SpecError
-from dbt_extra.optimization import optimize, optimize_source
+from dbt_extra.optimization import optimize
+from dbt_extra.sql.rewrites.engine import optimize_source
 from dbt_extra.project.project import Project
-from dbt_extra.sql.macros import StaticMacros, parse_model
+from dbt_extra.project.model_sql import definitions_for, parse_model
+from dbt_extra.sql.templates.interpreter import StaticMacros
 from dbt_extra.sql.parser import parse_authored
-from dbt_extra.sql.schema_evidence import SourceSchemas
-from dbt_extra.sql.shorthand import output_spans
-from dbt_extra.sql.source_rules import collapse_complementary_union, decorrelate_filter_exists, short_names
+from dbt_extra.sql.qualification import source_schema
+from dbt_extra.project.schema_evidence import SourceSchemas
+from dbt_extra.sql.templates.syntax import output_spans
+from dbt_extra.sql.rewrites.structural import collapse_complementary_union, decorrelate_filter_exists
+from dbt_extra.sql.aliases import short_names
 from tests.helpers import SQL_DIALECTS, invoke, project, put, snapshot
+from tests.optimizer_cases import RULE_QUERIES as SOURCE_RULES, RULE_SCHEMA as SCHEMA, assert_rule_exercised
+from tests.semantics import assert_equivalent, render_jinja, result
 
 
-SCHEMA = {
-    "violations": {"id": "INT", "type_id": "INT", "amount": "INT"},
-    "types": {"id": "INT", "code": "VARCHAR"},
-}
 RENAMED = """with violation as (
     select v.id as violation_id, v.type_id as violation_type_id from violations v
 ), violation_type as (
@@ -29,13 +31,6 @@ RENAMED = """with violation as (
 )
 select v.violation_id, v.violation_type_id, vt.violation_type_code
 from violation v join violation_type vt on v.violation_type_id = vt.id"""
-
-
-def result(connection, code, *, ordered=False):
-    cursor = connection.execute(code)
-    names = [d[0] for d in cursor.description]
-    rows = cursor.fetchall()
-    return names, [str(d[1]) for d in cursor.description], rows if ordered else Counter(rows)
 
 
 QUERIES = [
@@ -112,9 +107,12 @@ def test_renamed_cte_ast_bindings_across_dialects(dialect):
     "select id from violations v natural join types t",
     "with x as (select * from violations) select x.id from x",
 ])
-def test_unknown_join_and_projection_star_are_actionable_skips(code):
-    with pytest.raises(SpecError, match="schema"):
-        optimize_source(code, "duckdb")
+def test_unknown_join_and_projection_star_are_actionable_boundaries(code):
+    outcomes = []
+    candidate = optimize_source(code, "duckdb", outcomes=outcomes)
+    assert parse_authored(candidate, "duckdb").tree == parse_authored(code, "duckdb").tree
+    assert any(o["rule"] == "qualification" and "schema" in o["reason"] for o in outcomes)
+    assert any(o["rule"] == "projection_pruning" and o["status"] == "blocked" for o in outcomes)
 
 
 def test_explicit_bindings_unknown_inputs_and_count_star_are_not_rejected():
@@ -123,11 +121,14 @@ def test_explicit_bindings_unknown_inputs_and_count_star_are_not_rejected():
 
 
 def test_partial_schema_unknown_is_not_column_absence():
-    with pytest.raises(SpecError, match="unknown joined schema"):
-        optimize_source("select id from violations v join types t on v.type_id=t.id", "duckdb",
-                        schema={"violations": SCHEMA["violations"]})
-    with pytest.raises(SpecError):
-        optimize_source("select v.not_a_column from violations v", "duckdb", schema=SCHEMA)
+    outcomes = []
+    optimize_source("select id from violations v join types t on v.type_id=t.id", "duckdb",
+                    schema={"violations": SCHEMA["violations"]}, outcomes=outcomes)
+    assert any("unknown joined schema" in o["reason"] for o in outcomes)
+    outcomes = []
+    candidate = optimize_source("select v.not_a_column from violations v", "duckdb", schema=SCHEMA, outcomes=outcomes)
+    assert "v.not_a_column" in candidate
+    assert any(o["rule"] == "qualification" and o["status"] == "rolled_back" for o in outcomes)
 
 
 def test_ordered_star_expansion_and_modifiers():
@@ -151,27 +152,39 @@ def test_star_replacement_preserves_results_and_aliases():
     "select * rename (b as Renamed) from t", "select * ilike 'a%' from t",
 ])
 def test_unrestorable_or_unsupported_star_modifiers_skip(code):
-    with pytest.raises(SpecError, match="Unsupported projection star modifier"):
-        optimize_source(code, "snowflake", schema={"t": {"a": "INT", "b": "INT"}})
+    outcomes = []
+    candidate = optimize_source(code, "snowflake", schema={"t": {"a": "INT", "b": "INT"}}, outcomes=outcomes)
+    assert parse_authored(candidate, "snowflake").tree == parse_authored(code, "snowflake").tree
+    assert any("Unsupported projection star modifier" in o["reason"] for o in outcomes)
 
 
 @pytest.mark.parametrize("code", [
     "select * from t x join t y on x.a=y.a", "select x.a as Foo, x.b as foo from t x",
 ])
 def test_expanded_or_normalized_duplicate_outputs_skip(code):
-    with pytest.raises(SpecError, match="Duplicate output names"):
-        optimize_source(code, "duckdb", schema={"t": {"a": "INT", "b": "INT"}})
+    outcomes = []
+    candidate = optimize_source(code, "duckdb", schema={"t": {"a": "INT", "b": "INT"}}, outcomes=outcomes)
+    assert parse_authored(candidate, "duckdb").tree == parse_authored(code, "duckdb").tree
+    assert any("Duplicate output names" in o["reason"] for o in outcomes)
+
+
+@pytest.mark.parametrize("code", [
+    "with recursive x as (select 1 as id union all select id+1 from x where id<3) select id from x",
+    "select from (",
+])
+def test_unrecoverable_recursive_or_malformed_skip(code):
+    with pytest.raises(SpecError):
+        optimize_source(code, "duckdb", schema=SCHEMA)
 
 
 @pytest.mark.parametrize("code", [
     "select v.id, v.id from violations v",
     "select x.id from violations x where not exists(select 1 from types y where y.id=x.type_id)",
-    "with recursive x as (select 1 as id union all select id+1 from x where id<3) select id from x",
-    "select random() as n", "select custom_udf(id) as n from violations", "select from (",
+    "select random() as n", "select custom_udf(id) as n from violations",
 ])
-def test_duplicate_correlated_recursive_volatile_unknown_malformed_skip(code):
-    with pytest.raises(SpecError):
-        optimize_source(code, "duckdb", schema=SCHEMA)
+def test_opaque_queries_remain_renderable_without_invented_semantics(code):
+    candidate = optimize_source(code, "duckdb", schema=SCHEMA)
+    assert len(parse_authored(candidate, "duckdb").tree.selects) == len(parse_authored(code, "duckdb").tree.selects)
 
 
 @pytest.mark.parametrize("code, aliases", [
@@ -251,7 +264,7 @@ def test_macro_pruning_tracks_hidden_dependency_and_exact_call_counts(native):
 
 @pytest.mark.parametrize("body", [
     "id, amount", "*", "{{ adapter.get_columns_in_relation('x') }}", "{{ env_var('TOKEN') }}",
-    "{{ run_query('select 1') }}", "{{ var('columns') }}", "random()", "unknown_udf(amount)",
+    "{{ run_query('select 1') }}", "{{ var('columns') }}",
 ])
 def test_macro_fragments_context_and_volatile_calls_skip_without_inlining(native, body):
     put(native, "macros/value.sql", "{% macro fields() %}" + body + "{% endmacro %}")
@@ -263,7 +276,7 @@ def test_macro_fragments_context_and_volatile_calls_skip_without_inlining(native
 
 
 @pytest.mark.parametrize("expression, expected", [
-    ("value.upper()", "ABC"), ("value.lower()", "abc"), ("value.trim()", "AbC"),
+    ("value.upper()", "ABC"), ("value.lower()", "abc"), ("value.strip()", "AbC"),
     ("value | upper | trim", "ABC"), ("value | lower | trim", "abc"),
     ("false and missing", "False"), ("true or missing", "True"),
     ("1 < 2 and 'a' != 'b'", "True"),
@@ -271,7 +284,8 @@ def test_macro_fragments_context_and_volatile_calls_skip_without_inlining(native
 def test_bounded_static_allowlist_extensions(native, expression, expected):
     put(native, "macros/value.sql", "{% macro value(value) %}{{ " + expression + " }}{% endmacro %}")
     call = next(output_spans("{{ value(' AbC ') }}"))[3]
-    assert StaticMacros(project(native)).call(call).strip() == expected
+    p = project(native)
+    assert StaticMacros(definitions_for(p), package=p.name).call(call).strip() == expected
 
 
 def test_flat_tuple_unpack_loop_and_comparison(native):
@@ -310,8 +324,10 @@ def test_documented_source_and_curated_downstream_columns_are_partial(native):
     path = put(native, "models/documented.sql", "select * from {{ source('raw', 'orders') }}")
     put(native, "models/curated.yml", "version: 2\nmodels:\n- name: documented\n  columns:\n  - name: id\n")
     changes, skipped = optimize(project(native), select=["documented"])
-    assert "complete ordered input schemas" in skipped["model.shop.documented"]
-    assert path not in changes.after
+    assert not skipped
+    assert "*" in changes.after[path].decode()
+    assert any("complete ordered input schemas" in o["reason"]
+               for o in changes.optimization_report["model.shop.documented"]["outcomes"])
 
 
 def test_schema_dependency_cycles_skip_per_model(native):
@@ -338,15 +354,15 @@ def test_entire_inference_read_set_conflicts_even_noop(native, filename):
 
 
 def test_optimizer_keyerror_is_chained_actionable_and_batch_continues(native, monkeypatch):
-    from dbt_extra import optimization
-    real = optimization.rewrite_source
+    from dbt_extra.sql.rewrites import engine
+    real = engine.rewrite_source
 
-    def broken(tree, dialect):
+    def broken(tree, dialect, **kwargs):
         if any(c.name == "broken_column" for c in tree.find_all(exp.Column)):
             raise KeyError("inspection_job_id")
-        return real(tree, dialect)
+        return real(tree, dialect, **kwargs)
 
-    monkeypatch.setattr(optimization, "rewrite_source", broken)
+    monkeypatch.setattr(engine, "rewrite_source", broken)
     with pytest.raises(SpecError, match="KeyError.*inspection_job_id") as caught:
         optimize_source("select a.broken_column from t a", "duckdb")
     assert isinstance(caught.value.__cause__, KeyError)
@@ -357,22 +373,22 @@ def test_optimizer_keyerror_is_chained_actionable_and_batch_continues(native, mo
 
 
 def test_fixed_point_cycle_and_nonconvergence_skip(monkeypatch):
-    from dbt_extra import optimization
-    monkeypatch.setattr(optimization, "_once", lambda code, *a, **k: "b" if code == "a" else "a")
+    from dbt_extra.sql.rewrites import engine
+    monkeypatch.setattr(engine, "_once", lambda code, *a, **k: "b" if code == "a" else "a")
     with pytest.raises(SpecError, match="cycle"):
         optimize_source("a", "duckdb")
-    monkeypatch.setattr(optimization, "_once", lambda code, *a, **k: code + " ")
+    monkeypatch.setattr(engine, "_once", lambda code, *a, **k: code + " ")
     with pytest.raises(SpecError, match="four passes"):
         optimize_source("a", "duckdb")
 
 
 def test_unrelated_programming_keyerrors_are_not_swallowed(monkeypatch):
-    from dbt_extra import optimization
+    from dbt_extra.sql.rewrites import engine
 
     def broken_parser(*args, **kwargs):
         raise KeyError("programming error outside optimizer")
 
-    monkeypatch.setattr(optimization, "parse_authored", broken_parser)
+    monkeypatch.setattr(engine, "parse_authored", broken_parser)
     with pytest.raises(KeyError, match="programming error outside optimizer"):
         optimize_source("select t.id from t", "duckdb")
 
@@ -410,7 +426,8 @@ def test_change_classification_uses_original_to_fixed_point_ast(native, code, st
     changes, skipped = optimize(project(native), select=["classification"])
     assert not skipped
     report = changes.optimization_report["model.shop.classification"]
-    assert report == {"status": status, "formatting_only": status == "formatted",
+    assert report["outcomes"]
+    assert {k: v for k, v in report.items() if k != "outcomes"} == {"status": status, "formatting_only": status == "formatted",
                       "changed": status != "unchanged", "retained": (
                           ["DISTINCT tuple retained to preserve row multiplicity."]
                           if "distinct" in code else [])}
@@ -489,7 +506,7 @@ def test_macro_pruning_preserves_rows_and_barrier_dependencies(native, code, emp
     changes, skipped = optimize(p, select=["macro_safety"], expand=expand)
     assert not skipped
     candidate = changes.after[path].decode()
-    from dbt_extra.sql.macros import macro_calls
+    from dbt_extra.sql.templates.macros import macro_calls
     if expand:
         assert not macro_calls(candidate)
         assert changes.optimization_report["model.shop.macro_safety"]["status"] == "rewritten"
@@ -497,43 +514,23 @@ def test_macro_pruning_preserves_rows_and_barrier_dependencies(native, code, emp
         assert Counter(raw for _, _, raw, _ in macro_calls(code)) == Counter(
             raw for _, _, raw, _ in macro_calls(candidate))
 
-    def executable(text):
-        parsed = parse_model(p, text, expand=True)
-        for table in parsed.tree.find_all(exp.Table):
-            if table.name in parsed.refs:
-                table.set("this", exp.to_identifier("orders"))
-        return parsed.tree.sql(dialect="duckdb")
-
     with duckdb.connect() as con:
         con.execute("create table orders(id integer, amount integer)")
         if not empty:
             con.execute("insert into orders values (1,2),(1,2),(2,2),(3,null),(null,4),(4,0)")
-        assert result(con, executable(code)) == result(con, executable(candidate))
+        assert_equivalent(con, render_jinja(native, code), render_jinja(native, candidate))
     changes.apply()
     second, skipped = optimize(project(native), select=["macro_safety"], expand=expand)
     assert not skipped and not second.changed()
-
-
-SOURCE_RULES = {
-    "normalize": "select v.id from violations v where (v.id=1 and v.amount>1) or v.id=2",
-    "pushdown": "select q.id from (select distinct v.id from violations v) q where q.id>1 and true",
-    "join": "select a.id, b.id as peer, c.id as matched from violations a cross join violations b "
-            "join violations c on a.type_id=c.type_id and b.type_id=c.type_id",
-    "factor": "select a.id, a.n, b.n as other from "
-              "(select v.id, count(*) as n from violations v group by v.id) a join "
-              "(select v.id, count(*) as n from violations v group by v.id) b on a.id=b.id",
-    "membership": "select v.id from violations v where exists("
-                  "select 1 from types t where t.id=v.type_id and t.code='A')",
-    "union": "select v.id from violations v where v.amount=2 union all "
-             "select v.id from violations v where v.amount<>2",
-}
 
 
 @pytest.mark.parametrize("dialect", SQL_DIALECTS)
 @pytest.mark.parametrize("rule", SOURCE_RULES)
 def test_guarded_source_rules_rewrite_roundtrip_and_converge(rule, dialect):
     code = SOURCE_RULES[rule]
-    candidate = optimize_source(code, dialect, schema=SCHEMA)
+    outcomes = []
+    candidate = optimize_source(code, dialect, schema=SCHEMA, outcomes=outcomes)
+    assert_rule_exercised(rule, candidate, dialect, outcomes)
     tree = parse_authored(candidate, dialect).tree
     if rule == "normalize":
         assert isinstance(tree.args["where"].this, exp.And)
@@ -547,8 +544,11 @@ def test_guarded_source_rules_rewrite_roundtrip_and_converge(rule, dialect):
         assert len(list(tree.find_all(exp.CTE))) == 1
         assert len(list(tree.find_all(exp.Select))) == 2
     elif rule == "membership":
-        assert not list(tree.find_all(exp.Exists))
-        assert len(list(tree.find_all(exp.In))) == 1
+        if dialect in {"duckdb", "spark"}:
+            assert not list(tree.find_all(exp.Exists))
+            assert len(list(tree.find_all(exp.In))) == 1
+        else:
+            assert tree.find(exp.Exists) and not tree.find(exp.In)
     else:
         assert not list(tree.find_all(exp.Union))
         assert len(list(tree.find_all(exp.Table))) == 1
@@ -569,9 +569,11 @@ def test_guarded_source_rules_rewrite_roundtrip_and_converge(rule, dialect):
 def test_decorrelation_does_not_generalize_beyond_positive_equality_filters(term):
     code = "select v.id from violations v where " + term
     tree = parse_authored(code, "duckdb").tree
-    assert decorrelate_filter_exists(tree.copy()) == tree
-    with pytest.raises(SpecError, match="Correlated"):
-        optimize_source(code, "duckdb", schema=SCHEMA)
+    assert decorrelate_filter_exists(tree.copy(), dialect="duckdb", schema=source_schema(SCHEMA, "duckdb")) == tree
+    outcomes = []
+    candidate = optimize_source(code, "duckdb", schema=SCHEMA, outcomes=outcomes)
+    assert parse_authored(candidate, "duckdb").tree == tree
+    assert any("Correlated" in o["reason"] for o in outcomes)
 
 
 @pytest.mark.parametrize("code", [
@@ -581,7 +583,7 @@ def test_decorrelation_does_not_generalize_beyond_positive_equality_filters(term
 ])
 def test_decorrelation_keeps_output_truth_values_and_unknown_bindings(code):
     tree = parse_authored(code, "duckdb").tree
-    assert decorrelate_filter_exists(tree.copy()) == tree
+    assert decorrelate_filter_exists(tree.copy(), dialect="duckdb", schema=source_schema(SCHEMA, "duckdb")) == tree
 
 
 @pytest.mark.parametrize("left,right,operator", [

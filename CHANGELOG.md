@@ -8,6 +8,99 @@ changes receive a version and an ISO 8601 release date when released.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-05
+
+### Added
+
+- Support `DBT_PROJECT_DIR` for CLI and Python project selection after
+  `EXTRA_PROJECT_DIR` and before upward discovery. Explicit `--project-dir` and
+  Python directory arguments still take precedence; invalid selections fail
+  without falling back.
+- Rule checkpoints and structured applied/blocked/rolled-back outcomes for SQL
+  inspection and authored optimization. Recoverable rule failures discard only
+  their candidate; independent validated work survives.
+- Dependency-aware projection pruning for windows, QUALIFY, shared CTEs,
+  aggregates, positional references and set operations, with evaluation-safety
+  roots and retained global-aggregate cardinality.
+- Bounded top-level literal Jinja assignments, loops and conditions. Inspection
+  can render static SQL; authored templates remain byte-preserved by default and
+  require explicit `optimize --expand true` for reduction.
+- Generated synthetic dbt/temporal fixtures, repeated-dependency benchmark,
+  minimum/fresh SQLGlot compatibility CI and local Spark ANSI execution tests.
+- Strict execution oracles with deliberate broken-candidate checks, seeded
+  multi-rule/asymmetric-input cases, independent real-Jinja comparisons, real
+  before/after dbt-duckdb rebuilds, expanded Spark execution and a PostgreSQL 16 CI lane.
+- Spark execution targets PySpark 4.2.1 with Java 21, verifying the actual running
+  version so an inherited SPARK_HOME cannot silently test an older installation.
+- Reproducible, source-linked first-pass SQL-function audit for the nine remaining
+  dialects, separating native support, recognition gaps and type-inference gaps.
+- Explicit SQL-function gap catalogs for Fabric Warehouse (3), Databricks (3),
+  DuckDB (4), and PostgreSQL (6), with per-entry recognition, conservative typing,
+  generator/safety and YAML-enrichment tests. Native functions, CLI-only DuckDB
+  `getenv`, and unproven Fabric overloads remain outside the catalogs. This adds
+  offline coverage, not warehouse execution certification.
+- Complete the remaining SQL-function batches with explicit Snowflake (4),
+  BigQuery (2), Redshift (4), Trino (4), and Athena engine-3 (4) gap entries,
+  official-source audit evidence and per-function enrichment/safety regressions.
+  Trino `bar` supports exactly two or four arguments; BigQuery contextual and
+  nested input-dependent results remain unresolved. No native ASTs are replaced
+  and no new function-evaluation or rewrite permission is granted.
+- Python API reference, metadata-enrichment and partial-optimization guides, and
+  multi-layer column-tracing examples in Jaffle Shop and `examples/column_trace`.
+
+### Changed
+
+- Unknown, volatile and fallible functions block affected evaluation movement,
+  not unrelated constant folding. Binding failures retain SQL and disable
+  binding-dependent rules instead of necessarily skipping the whole model.
+- Inspection uses complete query-derived schema evidence, never assumes YAML
+  documentation is exhaustive, and caches parsing, demands and expanded bodies
+  within an operation. Repeated expansion diagnostics retain occurrence counts.
+- Generated SQL aliases use readable input names with collision handling instead
+  of internal counters, preserving authored aliases and correlated bindings.
+  Long expanded names retain their original identity in comments.
+- Conservatively remove single-use CTEs and column-only projection wrappers when
+  evaluation, output bindings and row-affecting boundaries remain intact.
+- **Breaking:** Rename `Project.find()` to `Project.find_model()`, `Parsed` to
+  `ParsedSQL`, and function records `Function` / `Shape` to `FunctionSpec` /
+  `FunctionShape`. Move standalone `optimize_source()` from
+  `dbt_extra.optimization` to `dbt_extra.sql.rewrites.engine`.
+- **Breaking:** Reorganize SQL templates and rewrites under `sql.templates` and
+  `sql.rewrites`, project-aware SQL adapters under `project`, analysis records
+  and type inference under `analysis.results` and `analysis.type_inference`,
+  and workbook handling under `review.xlsx`. Review shorthand moves to
+  `review.shorthand`; removed module paths and names have no compatibility aliases.
+- **Breaking:** Move project-specific `ChangeSet.properties()` and
+  `ChangeSet.project_config()` edits to `dbt_extra.project.property_edits.PropertyEdits(changes)`.
+  Generic `ChangeSet` handles checked byte writes only; optimization and review
+  import return `WorkflowChanges` with explicit report fields.
+
+### Fixed
+
+- EXISTS-to-IN rewriting now requires matching declared integral base-column
+  types on explicitly tested engines; mixed/unknown types retain EXISTS instead
+  of risking changed comparison coercion or binding errors.
+- Optimized project models no longer gain statement terminators that break dbt
+  materialization wrappers. Standalone SQL output still has a terminator.
+- Static string methods follow real Jinja: `.strip()` is supported instead of
+  the nonexistent `.trim()` method; the `trim` filter remains supported.
+- Inspection no longer simplifies overflowing `(2147483647 + 1) * 0` to zero.
+- Qualification avoids copying potentially fallible/volatile alias expressions.
+  Local rewrites retain unnamed computed output labels and exact decimal types.
+- Unused projected RHS columns alone no longer authorize erasing fallible join
+  evaluation. SQL-derived uniqueness and matching proofs remain necessary.
+- Predicate rewrites retain input-dependent comparisons when simplification
+  would otherwise erase unproven implicit-conversion behavior.
+- Match local function catalogs when validated dialect strings include settings,
+  without dropping those settings from parsing or type inference. Validate source
+  registrations before duplicate names can be overwritten, and make generator
+  shape dispatch dialect-specific with an unknown-shape fallback for new entries.
+
+### Removed
+
+- **Breaking:** Remove legacy flat XLSX import support. Re-export affected
+  workbooks using the current hierarchical layout before editing or importing.
+
 ## [0.2.0] - 2026-11-04
 
 ### Added
@@ -85,6 +178,7 @@ Initial release of **dbt-extra**.
 - PyPI trusted publishing after CI on `v*` tags or manual dispatch, with
   release-tag/package-version verification for tag runs.
 
-[Unreleased]: https://github.com/billybillysss/dbt-extra/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/billybillysss/dbt-extra/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/billybillysss/dbt-extra/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/billybillysss/dbt-extra/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/billybillysss/dbt-extra/releases/tag/v0.1.0

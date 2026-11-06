@@ -14,14 +14,15 @@ from dbt_extra.cli import cli
 from dbt_extra.analysis import analyze
 from dbt_extra.files.changes import ChangeSet
 from dbt_extra.enrichment import enrich
-from dbt_extra.optimization import optimize, optimize_source
+from dbt_extra.optimization import optimize
+from dbt_extra.sql.rewrites.engine import optimize_source
 from dbt_extra.validation import validate
 from dbt_extra.project import Project
 from dbt_extra.review import export_review, import_review
 from dbt_extra.review.import_ import read_review
 from dbt_extra.inspection import inspect
 from dbt_extra.sql import parse_authored, render
-from dbt_extra.sql.jinja import validate_template
+from dbt_extra.sql.templates.syntax import validate_template
 from dbt_extra.errors import SpecError
 from dbt_extra.files.yaml import load_yaml
 
@@ -32,10 +33,10 @@ from tests.helpers import SQL_DIALECTS, edit_csv, invoke, project, put, snapshot
 def test_optional_config_and_single_root_paths(native, monkeypatch):
     monkeypatch.delenv("EXTRA_PROJECT_DIR", raising=False)
     p = project(native)
-    assert p.find("orders").model_path == "models/slv"
-    assert p.find("revenue").model_path == "models/gld"
+    assert p.find_model("orders").model_path == "models/slv"
+    assert p.find_model("revenue").model_path == "models/gld"
     put(native, "models/root_model.sql", "select 1 as id")
-    assert project(native).find("root_model").model_path == "models"
+    assert project(native).find_model("root_model").model_path == "models"
     monkeypatch.chdir(native / "models/gld")
     assert Project(dialect="duckdb").root == native
 
@@ -45,9 +46,9 @@ def test_multiple_roots_preserve_project_relative_paths(native):
     put(native, "reporting/finance/profit.sql", "select 1 as profit")
     put(native, "reporting/root_model.sql", "select 1 as id")
     p = project(native)
-    assert p.find("orders").model_path == "models/slv"
-    assert p.find("profit").model_path == "reporting/finance"
-    assert p.find("root_model").model_path == "reporting"
+    assert p.find_model("orders").model_path == "models/slv"
+    assert p.find_model("profit").model_path == "reporting/finance"
+    assert p.find_model("root_model").model_path == "reporting"
 
 
 def test_all_resource_paths_include_parent_folders(native):
@@ -207,7 +208,7 @@ def test_optimize_source_without_artifacts_preserves_templates(native):
 
 @pytest.mark.parametrize("code", [
     "select {{ macro('x') }} as x", "{% if execute %}select 1{% else %}select 2{% endif %}",
-    "select * from {{ ref(var('model')) }}", "select random() as x", "select udf(1) as x",
+    "select * from {{ ref(var('model')) }}",
     "{{- config(materialized='view') -}}select 1 as id",
 ])
 def test_unsafe_optimization_is_skipped(native, code):
@@ -284,7 +285,7 @@ def test_enrich_passthrough_only_and_fill_missing(native):
     assert any(r.get("value") == "Order identifier" for r in report)
     assert not any(r.get("value") == "Order amount" and r.get("column") == "revenue" for r in report)
     changes.apply()
-    r = project(native).find("revenue")
+    r = project(native).find_model("revenue")
     assert r.columns["id"]["description"] == "Order identifier"
     assert r.columns["id"]["data_type"].lower() == "bigint"
 
@@ -295,7 +296,7 @@ def test_manifest_names_and_staleness_do_not_rewrite_compiled_sql(native):
         "raw_code": "select 999 as revenue", "compiled_code": "delete from production"}}}
     put(native, "target/manifest.json", json.dumps(manifest))
     p = Project(native)
-    assert p.find("renamed").model_path == "models/gld"
+    assert p.find_model("renamed").model_path == "models/gld"
     assert any(i["code"] == "SOURCE_CHANGED" for i in p.diagnostics)
     changes, skipped = optimize(p, select=["renamed"])
     assert not skipped
@@ -306,7 +307,7 @@ def test_missing_dialect_is_explicit(native):
     p = Project(native)
     with pytest.raises(SpecError, match="requires --dialect"):
         optimize(p)
-    assert analyze(p, p.find("orders"))["status"] == "unavailable"
+    assert analyze(p, p.find_model("orders"))["status"] == "unavailable"
 
 
 def test_checked_writes_rollback_on_replace_failure(native, monkeypatch):
@@ -396,13 +397,13 @@ def test_global_aggregate_inspection_preserves_one_row(native, optimized, rows):
 def test_wildcard_requires_evidence_and_does_not_invent_metadata(native):
     put(native, "models/target.sql", "select * from {{ ref('orders') }}")
     p = project(native)
-    analysis = analyze(p, p.find("target"))
+    analysis = analyze(p, p.find_model("target"))
     assert {c["name"] for c in analysis["columns"]} == {"id", "amount"}
     tree, refs, _ = inspect(p, "target", ["amount"])
     assert len(tree.selects) == 1
     put(native, "models/unknown.sql", "select * from {{ ref('not_loaded') }}")
     p = project(native)
-    assert analyze(p, p.find("unknown"))["status"] == "partial"
+    assert analyze(p, p.find_model("unknown"))["status"] == "partial"
     with pytest.raises(SpecError, match="unresolved"):
         inspect(p, "unknown", ["amount"])
 
@@ -410,7 +411,7 @@ def test_wildcard_requires_evidence_and_does_not_invent_metadata(native):
 def test_unknown_join_schema_does_not_supply_false_lineage(native):
     put(native, "models/unknown.sql", "select amount as value from {{ ref('orders') }} o join {{ ref('not_loaded') }} x on o.id=x.id")
     p = project(native)
-    result = analyze(p, p.find("unknown"))
+    result = analyze(p, p.find_model("unknown"))
     assert result["status"] == "partial"
     column = next(c for c in result["columns"] if c["name"] == "value")
     assert column["upstream_columns"] == []

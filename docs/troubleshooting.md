@@ -4,9 +4,10 @@
 
 Run from the right directory or use
 `uv run extra --project-dir examples/jaffle_shop validate`. The global option comes
-before the command. The environment variable is exactly `EXTRA_PROJECT_DIR`.
-The selected directory must contain `dbt_project.yml`. Without an explicit
-directory, the nearest ancestor containing that file wins. Tool settings are
+before the command. Project selection is `--project-dir` > `EXTRA_PROJECT_DIR` >
+`DBT_PROJECT_DIR` > nearest ancestor containing `dbt_project.yml`.
+The selected directory must contain `dbt_project.yml`; invalid selections do not
+fall back to lower-priority sources. Tool settings are
 optional and loaded only beside it. `extra --project-dir DIRECTORY init` adds
 settings to that root; `init` has no positional directory argument.
 
@@ -32,13 +33,15 @@ See [configuration](reference/configuration.md).
 Check the dialect, explicit columns, relation aliases and loaded upstream definitions.
 Opaque macros/dynamic templates cannot expand offline. Ambiguous columns, cycles and
 unsafe relation modifiers report errors rather than using warehouse guesses.
-Successful output retains dbt ref/source boundaries; dbt-extra never executes it.
+Use `--compile false` to retain dbt ref/source templates; the default resolves
+available physical names offline. dbt-extra never executes the output.
 Inspection explains definitions, not stored data. A logical plan is not warehouse
 EXPLAIN. Missing schemas can prevent SELECT * expansion.
 
 ## Optimization succeeds but a model is unchanged
 
-It may already be normalized or depend on a runtime macro. Read stderr for skips.
+It may already be normalized or depend on a runtime macro. Read the coverage
+messages and stderr for skips.
 Other eligible models can still be optimized. A successful exit does not mean
 every model changed, every metadata property resolved, or a speedup was measured.
 

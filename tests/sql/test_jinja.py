@@ -2,7 +2,7 @@
 
 import pytest
 
-from dbt_extra.sql.jinja import macro_blocks
+from dbt_extra.sql.templates.syntax import macro_blocks
 
 
 @pytest.mark.parametrize("prefix,suffix", [

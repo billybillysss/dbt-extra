@@ -1,20 +1,15 @@
-"""Comment-preserving property patches and checked, rollback-capable writes."""
+"""Checked byte changes, read-set conflicts and rollback-capable writes."""
 
 from __future__ import annotations
 
 import difflib
 import hashlib
-import io
 import os
 import tempfile
 from pathlib import Path
 
-from ruamel.yaml import YAML
-
 from dbt_extra.files.paths import safe_path, within
 from dbt_extra.errors import SpecError
-from dbt_extra.files.yaml import load_yaml, update_mapping
-from dbt_extra.project.properties import scope_config, validate_properties
 
 
 def digest(content):
@@ -32,7 +27,6 @@ class ChangeSet:
         self.root = root.resolve()
         self.before = {}
         self.after = {}
-        self.documents = {}
 
     def watch(self, path, expected=None, *, check=False, external=False):
         # Only read-set checks may explicitly watch external tool settings.
@@ -48,73 +42,6 @@ class ChangeSet:
     def set(self, path, value):
         path = self.watch(path)
         self.after[path] = value.encode("utf-8") if isinstance(value, str) else value
-
-    def project_config(self, project, locator, proposed):
-        """Patch direct authored dbt config keys without replacing child scopes."""
-        if (not locator or locator[0] not in {"models", "seeds", "snapshots"}
-                or any(not isinstance(k, str) or k.startswith("+") for k in locator)):
-            raise SpecError("Invalid dbt configuration scope")
-        if any(not k.startswith("+") and isinstance(v, dict) for k, v in proposed.items()):
-            raise SpecError("Mapping-valued dbt configuration requires a + prefix; child scopes cannot be edited as config")
-        path = project.root / "dbt_project.yml"
-        self.watch(path, digest(project.contents[path]), check=True)
-        if path not in self.documents:
-            parser = YAML(typ="rt")
-            parser.preserve_quotes = True
-            parser.width = 4096
-            parser.indent(mapping=2, sequence=4, offset=2)
-            load_yaml(path)
-            self.documents[path] = parser, parser.load(self.before[path].decode("utf-8"))
-        parser, document = self.documents[path]
-        target = document
-        for key in locator:
-            if getattr(target, "merge", None) or getattr(getattr(target, "anchor", None), "value", None):
-                raise SpecError("Edits to YAML aliases, anchors, or merge mappings require manual review")
-            if not isinstance(target, dict) or key not in target:
-                raise SpecError("dbt configuration scope changed since export")
-            target = target[key]
-        if not isinstance(target, dict):
-            raise SpecError("dbt configuration scope must be a mapping")
-        if scope_config(target) == proposed:
-            return
-        children = {k: v for k, v in target.items() if not k.startswith("+") and isinstance(v, dict)}
-        if proposed.keys() & children.keys():
-            raise SpecError("Configuration cannot replace a child dbt scope")
-        update_mapping(target, {**children, **proposed})
-        stream = io.StringIO()
-        parser.dump(document, stream)
-        self.after[path] = stream.getvalue().encode("utf-8")
-
-    def properties(self, project, resource, properties):
-        validate_properties(properties, resource.id)
-        if resource.path is None or resource.package != project.name:
-            raise SpecError(f"Read-only package/artifact resource: {resource.id}")
-        if resource.properties.get("versions") or properties.get("versions"):
-            raise SpecError(f"Versioned properties are read-only: {resource.id}")
-        path = resource.property_path
-        if path is None:
-            raise SpecError(f"No existing writable dbt YAML entry for {resource.id}; add one in dbt and retry")
-        self.watch(path, digest(project.contents[path]), check=True)
-        path = self.watch(path)
-        if path not in self.documents:
-            parser = YAML(typ="rt")
-            parser.preserve_quotes = True
-            parser.width = 4096
-            parser.indent(mapping=2, sequence=4, offset=2)
-            raw = self.before[path]
-            load_yaml(path)  # strict duplicate-key and portable-literal checks
-            document = parser.load(raw.decode("utf-8"))
-            self.documents[path] = parser, document
-        parser, document = self.documents[path]
-        target = document
-        for key in resource.property_locator:
-            target = target[key]
-        if resource.kind == "source_group":
-            properties = {**properties, "tables": target.get("tables", [])}
-        update_mapping(target, properties)
-        stream = io.StringIO()
-        parser.dump(document, stream)
-        self.after[path] = stream.getvalue().encode("utf-8")
 
     def changed(self):
         return {p: data for p, data in self.after.items() if data != self.before[p]}

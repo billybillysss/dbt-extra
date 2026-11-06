@@ -3,7 +3,8 @@
 import pytest
 
 from dbt_extra.errors import SpecError
-from dbt_extra.sql.shorthand import display, restore, output_spans
+from dbt_extra.review.shorthand import display, restore
+from dbt_extra.sql.templates.syntax import output_spans
 
 
 @pytest.mark.parametrize("raw,short", [

@@ -3,14 +3,14 @@
 from xml.etree import ElementTree as ET
 import json
 
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 import pytest
 
 from dbt_extra.review import export_review, import_review
 from dbt_extra.review.import_ import read_review
 from dbt_extra.review.export import baseline_for, tables_for
 from dbt_extra.analysis import catalog
-from dbt_extra.review.workbook import MODEL_HEADERS, workbook
+from dbt_extra.review.xlsx.layout import MODEL_HEADERS
 from dbt_extra.errors import SpecError
 from dbt_extra.files.yaml import load_yaml
 from tests.helpers import project, put, snapshot
@@ -65,7 +65,7 @@ def test_missing_yaml_metadata_is_skipped_but_xlsx_sql_edits_apply(native):
     changes.apply()
     assert "2 AS id" in sql.read_text()
     assert set(snapshot(native)) == set(before)
-    assert not project(native).find("undocumented").properties
+    assert not project(native).find_model("undocumented").properties
 
 
 def test_hierarchy_layout_and_forest_paper_theme(native):
@@ -154,7 +154,7 @@ def test_scoped_sql_metadata_and_config_roundtrip(native):
     assert "# Keep folder config" in (native / "dbt_project.yml").read_text()
     assert "# original scope" in (native / "dbt_project.yml").read_text()
     # An effective inline config override is not flattened into the scope.
-    assert project(native).find("revenue").config["materialized"] == "table"
+    assert project(native).find_model("revenue").config["materialized"] == "table"
 
 
 @pytest.mark.parametrize("header,value", [("Path", "other"), ("Resource ID", "invented"), ("Package", "invented"), ("Name", "renamed")])
@@ -220,22 +220,17 @@ def test_config_conflicts_and_scope_boundaries(native):
         import_review(project(native), path)
 
 
-def test_flat_xlsx_compatibility(native):
+def test_flat_xlsx_requires_reexport(native):
     p = project(native)
     tables = tables_for(catalog(p, p.select()))
     baseline = baseline_for(p, tables)
     path = put(native, "old.xlsx", "")
-    path.write_bytes(workbook(tables, baseline))
-    assert import_review(p, path).apply() == []
-    book = load_workbook(path)
-    tab = book["resources"]
-    for row in tab.iter_rows(min_row=2):
-        if row[0].value == "model.shop.revenue":
-            row[6].value = "Reviewed description"
+    book = Workbook()
+    book.create_sheet("_baseline").append([json.dumps(baseline)])
     book.save(path)
     book.close()
-    import_review(p, path).apply()
-    assert load_yaml(native / "models/schema.yml")["models"][1]["description"] == "Reviewed description"
+    with pytest.raises(SpecError, match="Unsupported workbook layout; re-export"):
+        import_review(p, path)
 
 
 def test_opaque_source_and_macro_source_remain_editable(native):
@@ -397,8 +392,8 @@ def test_source_table_selection_keeps_readonly_source_summary(native):
 
 def test_config_clear_preserves_child_scopes_and_prefixless_settings(native):
     put(native, "dbt_project.yml", "name: shop\nmodels:\n  shop:\n    materialized: view\n    slv:\n      +tags: [staged]\n")
-    assert project(native).find("orders").inherited_config["tags"] == ["staged"]
-    assert project(native).find("orders").inherited_config["materialized"] == "view"
+    assert project(native).find_model("orders").inherited_config["tags"] == ["staged"]
+    assert project(native).find_model("orders").inherited_config["materialized"] == "view"
     path = export(native)
     config_edit(path, "models.shop", "")
     config_edit(path, "models.shop.slv", '{"+tags": ["staged"], "+meta": {"owner": "ops"}}')

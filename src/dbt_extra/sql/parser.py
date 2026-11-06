@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass, field
 
 from jinja2 import TemplateSyntaxError, nodes
 from sqlglot import exp, parse
@@ -13,24 +12,9 @@ from sqlglot.errors import ErrorLevel, SqlglotError
 from dbt_extra.errors import SpecError
 from dbt_extra.files.yaml import text
 from dbt_extra.sql.functions import recognize_functions
-from dbt_extra.sql.jinja import JINJA, environment, validate_template
-from dbt_extra.sql.references import Reference
-
-
-class UnsupportedSQL(SpecError):
-    """Valid template structure that cannot be analyzed without rendering dbt."""
-
-
-@dataclass
-class Parsed:
-    tree: exp.Query
-    refs: dict[str, Reference] = field(default_factory=dict)
-    prefix: str = ""
-    config: dict = field(default_factory=dict)
-    config_dynamic: bool = False
-    macros: dict[str, str] = field(default_factory=dict)
-    opaque_macros: dict[str, str] = field(default_factory=dict)
-    macro_aliases: dict[str, str] = field(default_factory=dict)
+from dbt_extra.sql.templates.syntax import JINJA, environment, validate_template
+from dbt_extra.sql.templates.expansion import expand_static
+from dbt_extra.sql.models import ParsedSQL, Reference, UnsupportedSQL
 
 
 def read_query(value: str, context: str, dialect) -> exp.Query:
@@ -58,6 +42,10 @@ def read_query(value: str, context: str, dialect) -> exp.Query:
 def parse_authored(code, dialect, context="SQL"):
     """Mask static config/ref/source/this constructs; never evaluate templates."""
     validate_template(code, context)
+    if "{%" in code or "{#" in code:
+        parsed = parse_authored(expand_static(code, context), dialect, context)
+        parsed.template_source = code
+        return parsed
     refs, configs = {}, {}
     config_dynamic = False
     prefix_end = 0
@@ -128,4 +116,4 @@ def parse_authored(code, dialect, context="SQL"):
             raise UnsupportedSQL(f"{context}: dbt references must be standalone SQL relation inputs")
         for identifier in identifiers:
             identifier.set("quoted", True)
-    return Parsed(tree, refs, code[:prefix_end], configs, config_dynamic)
+    return ParsedSQL(tree, refs, code[:prefix_end], configs, config_dynamic)

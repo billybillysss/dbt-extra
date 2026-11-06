@@ -9,6 +9,7 @@ from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
 
 from dbt_extra.analysis import analyze
 from dbt_extra.files.changes import ChangeSet, digest
+from dbt_extra.project.property_edits import PropertyEdits
 from dbt_extra.sql.parser import parse_authored
 from dbt_extra.errors import SpecError
 
@@ -16,6 +17,7 @@ from dbt_extra.errors import SpecError
 def enrich(project, *, select=None, exclude=None, changes=None):
     project.require_dialect()
     changes = changes or ChangeSet(project.root)
+    properties = PropertyEdits(changes)
     for path, data in project.contents.items():
         changes.watch(path, digest(data), check=True, external=not path.is_relative_to(project.root))
     report, cache, active = [], {}, set()
@@ -87,5 +89,5 @@ def enrich(project, *, select=None, exclude=None, changes=None):
                     report.append({"resource_id": r.id, "column": name, "property": key, "reason": "Not safely inferable from available source metadata"})
         proposed.setdefault("name", r.name)
         if any("value" in item and item["resource_id"] == r.id for item in report):
-            changes.properties(project, r, proposed)
+            properties.properties(project, r, proposed)
     return changes, report

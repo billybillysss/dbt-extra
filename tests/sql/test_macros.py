@@ -4,7 +4,8 @@ import pytest
 
 from dbt_extra.errors import SpecError
 from dbt_extra.inspection import inspect
-from dbt_extra.sql.macros import parse_model, classify_calls, contains_opaque
+from dbt_extra.project.model_sql import definitions_for, model_macro_calls, parse_model
+from dbt_extra.sql.templates.macros import contains_opaque
 from dbt_extra.sql.renderer import render
 from tests.helpers import SQL_DIALECTS, project, put
 
@@ -95,21 +96,22 @@ def test_nested_or_conditionally_defined_macros_are_not_assumed_available(native
     "{{ 'x' ~ 'y' }}",
 ])
 def test_macro_expansion_limits_fail_explicitly(native, monkeypatch, body):
-    from dbt_extra.sql import macros
+    from dbt_extra.sql.templates import interpreter
 
     put(native, "macros/limited.sql", "{% macro limited(values) %}" + body + "{% endmacro %}")
-    monkeypatch.setattr(macros, "LIMIT", 1)
+    monkeypatch.setattr(interpreter, "LIMIT", 1)
     with pytest.raises(SpecError, match="size limit"):
         parse_model(project(native), "select {{ limited(['x', 'y']) }} as value", expand=True)
 
 
 def test_literal_tuples_keep_their_jinja_output_representation(native):
-    from dbt_extra.sql.macros import StaticMacros
-    from dbt_extra.sql.shorthand import output_spans
+    from dbt_extra.sql.templates.interpreter import StaticMacros
+    from dbt_extra.sql.templates.syntax import output_spans
 
     put(native, "macros/echo.sql", "{% macro echo(value) %}{{ value }}{% endmacro %}")
     call = next(output_spans("{{ echo((1, 2)) }}"))[3]
-    assert StaticMacros(project(native)).call(call) == "(1, 2)"
+    p = project(native)
+    assert StaticMacros(definitions_for(p), package=p.name).call(call) == "(1, 2)"
 
 
 @pytest.mark.parametrize("expanded", [False, True])
@@ -133,7 +135,7 @@ def test_aggregate_window_and_aliased_macros_have_one_output(native, body):
     call = "{{ value('amount') }}"
     code = "select " + call + ("" if "as total" in body else " as total") + " from {{ ref('orders') }}"
     p = project(native)
-    assert classify_calls(p, code)[0].single_column
+    assert model_macro_calls(p, code)[0].single_column
     parsed = parse_model(p, code)
     assert [c.output_name for c in parsed.tree.selects] == ["total"]
     rendered = render(parsed.tree, parsed, "duckdb")
@@ -145,7 +147,7 @@ def test_partial_macro_parsing_keeps_independent_call_boundaries(native):
     put(native, "macros/money.sql", SCALAR)
     code = "select {{ unknown() }}, {{ round_money('amount') }} as total from {{ ref('orders') }}"
     p = project(native)
-    calls = classify_calls(p, code)
+    calls = model_macro_calls(p, code)
     assert calls[0].sql is None and "no local static definition" in calls[0].reason
     assert calls[1].single_column and calls[1].sql == "round(amount, 2)"
     with pytest.raises(SpecError, match="no local static definition"):
