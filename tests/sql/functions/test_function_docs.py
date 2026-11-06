@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import json
+import re
 import runpy
 
 import pytest
@@ -81,7 +82,16 @@ def test_ownership_includes_unsupported_names_without_inheriting_related_catalog
 
 def test_matrix_documentation_is_current_and_has_all_dialect_headers():
     text = (GENERATOR["DOCS"] / "README.md").read_text(encoding="utf-8")
-    assert GENERATOR["document"]("README", text) == text
+    # Fresh-dependency package tests may use a newer SQLGlot than the snapshot.
+    # Ignore only its generation-version label, not changes to the inventory.
+    version = re.search(r"Generated against \*\*SQLGlot ([^*]+)\*\*", text)
+    assert version is not None
+    expected = text.replace(
+        version[0],
+        f"Generated against **SQLGlot {GENERATOR['sqlglot'].__version__}**",
+        1,
+    )
+    assert GENERATOR["document"]("README", text) == expected
     block = text.split(GENERATOR["START"])[1]
     assert "| SQL function |" in block
     assert all(f"[{label}]({dialect}.md)" in block
