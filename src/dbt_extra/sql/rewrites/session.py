@@ -101,11 +101,27 @@ def outcome_text(item):
     return message + (f" ({count} occurrences)" if count > 1 else "")
 
 
+def _comments(tree):
+    return sorted(comment for node in tree.walk() for comment in node.comments or [])
+
+
+def _sql_without_comments(tree, dialect):
+    tree = tree.copy()
+    for node in tree.walk():
+        node.pop_comments()
+    return sql(tree, dialect)
+
+
 def validate_contract(before, after, dialect):
+    """Check candidate comments separately from executable render stability.
+
+    Comment attachment can change on reparse. This is neither an execution
+    equivalence proof nor a guarantee of lossless serializer comment handling.
+    """
     if output_contract(before) != output_contract(after):
         raise RejectedCandidate("output names or order changed")
-    if sorted(c for n in before.walk() for c in n.comments or []) != sorted(c for n in after.walk() for c in n.comments or []):
+    if _comments(before) != _comments(after):
         raise RejectedCandidate("SQL comments would be discarded")
     reparsed = read_query(sql(after, dialect), "optimized SQL", dialect)
-    if sql(reparsed, dialect) != sql(after, dialect):
+    if _sql_without_comments(reparsed, dialect) != _sql_without_comments(after, dialect):
         raise RejectedCandidate("SQL did not round-trip")
